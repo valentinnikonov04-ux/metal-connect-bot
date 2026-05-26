@@ -1,4 +1,11 @@
-const tg = window.Telegram?.WebApp;
+window.addEventListener("error", (event) => {
+  const errorBox = document.createElement("div");
+  errorBox.style.cssText = "position:fixed;left:12px;right:12px;bottom:12px;z-index:9999;padding:12px;border-radius:8px;background:#fff3f0;color:#8a1f11;border:1px solid #e0a297;font:14px -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;";
+  errorBox.textContent = "Ошибка Mini App: " + (event.message || "неизвестная ошибка");
+  document.body.appendChild(errorBox);
+});
+
+const tg = window.Telegram && window.Telegram.WebApp ? window.Telegram.WebApp : null;
 
 if (tg) {
   tg.ready();
@@ -6,7 +13,7 @@ if (tg) {
 }
 
 const state = {
-  role: localStorage.getItem("mc_role") || "customer",
+  role: safeGet("mc_role", "customer"),
   view: "dashboard",
   executors: [
     { name: "ТехноМеталл", city: "Москва", works: ["токарка", "фрезеровка"], rating: 4.9, reviews: 42, phone: "+7 900 111-22-33", x: 28, y: 38 },
@@ -26,7 +33,7 @@ const $$ = (selector) => Array.from(document.querySelectorAll(selector));
 
 function setRole(role) {
   state.role = role;
-  localStorage.setItem("mc_role", role);
+  safeSet("mc_role", role);
   $$(".seg").forEach((button) => button.classList.toggle("active", button.dataset.role === role));
   $("#welcomeTitle").textContent = role === "customer" ? "Кабинет заказчика" : role === "executor" ? "Кабинет исполнителя" : "Кабинет разработчика";
   updateDashboard();
@@ -93,11 +100,11 @@ function publishOrder() {
     return;
   }
 
-  if (tg?.sendData) {
+  if (tg && tg.sendData) {
     tg.sendData(JSON.stringify(payload));
     tg.close();
   } else {
-    localStorage.setItem("mc_last_order", JSON.stringify(payload));
+    safeSet("mc_last_order", JSON.stringify(payload));
     showToast("Демо: заказ сохранен локально. В Telegram он отправится в бота.");
   }
 }
@@ -146,11 +153,28 @@ function renderMessages() {
 }
 
 function showToast(message) {
-  if (tg?.showPopup) {
+  if (tg && tg.showPopup) {
     tg.showPopup({ message });
   } else {
     alert(message);
   }
+}
+
+function safeGet(key, fallback) {
+  try {
+    return localStorage.getItem(key) || fallback;
+  } catch (error) {
+    return fallback;
+  }
+}
+
+function safeSet(key, value) {
+  try {
+    localStorage.setItem(key, value);
+  } catch (error) {
+    return false;
+  }
+  return true;
 }
 
 function useTemplate() {
@@ -191,7 +215,7 @@ function initEvents() {
     $("#chatInput").focus();
   }));
   $("#supportBtn").addEventListener("click", () => {
-    if (tg?.openTelegramLink) {
+    if (tg && tg.openTelegramLink) {
       tg.openTelegramLink("https://t.me/valentinn_nikonov");
     } else {
       showToast("Поддержка откроется внутри Telegram.");
