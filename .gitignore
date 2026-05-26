@@ -1,0 +1,13 @@
+.env
+*.db
+*.sqlite
+*.sqlite3
+__pycache__/
+*.py[cod]
+.DS_Store
+tools/
+Помошник
+.venv/
+venv/
+dist/
+build/

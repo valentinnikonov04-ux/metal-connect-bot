@@ -1,0 +1,1 @@
+"""METAL CONNECT bot package."""
