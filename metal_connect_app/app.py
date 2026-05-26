@@ -502,9 +502,13 @@ async def command_app(message: Message):
         )
         return
     keyboard = InlineKeyboardMarkup(
-        inline_keyboard=[[InlineKeyboardButton(text="Открыть Mini App", web_app=WebAppInfo(url=WEBAPP_URL))]]
+        inline_keyboard=[[InlineKeyboardButton(text="Открыть Mini App v4", web_app=WebAppInfo(url=WEBAPP_URL))]]
     )
-    await message.answer("Открывайте визуальный кабинет METAL CONNECT.", reply_markup=keyboard)
+    await message.answer(
+        "Открывайте визуальный кабинет METAL CONNECT.\n\n"
+        f"Текущая ссылка: {WEBAPP_URL}",
+        reply_markup=keyboard,
+    )
 
 
 @dp.message(Command("help"))
@@ -1286,7 +1290,7 @@ async def text_support(message: Message):
     await start_support_flow(message)
 
 
-@dp.message(F.text.in_({"Открыть Mini App", "Открыть мини приложение", "Mini App"}))
+@dp.message(F.text.in_({"Открыть кабинет", "Открыть Mini App", "Открыть мини приложение", "Mini App"}))
 async def text_mini_app(message: Message):
     await command_app(message)
 
@@ -1643,7 +1647,7 @@ async def setup_commands():
     )
     if WEBAPP_URL:
         await bot.set_chat_menu_button(
-            menu_button=MenuButtonWebApp(text="METAL CONNECT", web_app=WebAppInfo(url=WEBAPP_URL))
+            menu_button=MenuButtonWebApp(text="METAL CONNECT v4", web_app=WebAppInfo(url=WEBAPP_URL))
         )
 
 
@@ -1652,6 +1656,7 @@ async def main():
         raise RuntimeError("Set METAL_CONNECT_BOT_TOKEN environment variable before running the bot.")
     init_db()
     await setup_commands()
+    logging.info("Mini App URL: %s", WEBAPP_URL or "not configured")
     logging.info("METAL CONNECT bot started")
     await dp.start_polling(bot)
 
