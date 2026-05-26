@@ -11,15 +11,34 @@ from aiogram.types import (
 from metal_connect_app.config import WEBAPP_URL
 
 
-def main_keyboard() -> ReplyKeyboardMarkup:
-    first_row = [KeyboardButton(text="Меню"), KeyboardButton(text="Новый заказ")]
+def mini_app_button() -> KeyboardButton:
     if WEBAPP_URL:
-        first_row = [KeyboardButton(text="Открыть Mini App", web_app=WebAppInfo(url=WEBAPP_URL))]
+        return KeyboardButton(text="Открыть Mini App", web_app=WebAppInfo(url=WEBAPP_URL))
+    return KeyboardButton(text="Открыть Mini App")
+
+
+def main_keyboard(role: Optional[str] = None) -> ReplyKeyboardMarkup:
+    if role == "customer":
+        keyboard = [
+            [mini_app_button()],
+            [KeyboardButton(text="Мой профиль"), KeyboardButton(text="Мои заказы")],
+            [KeyboardButton(text="Создать заказ"), KeyboardButton(text="Написать в поддержку")],
+        ]
+    elif role == "executor":
+        keyboard = [
+            [mini_app_button()],
+            [KeyboardButton(text="Новые/актуальные заказы"), KeyboardButton(text="Мой профиль")],
+            [KeyboardButton(text="Мои отклики/мои предложения"), KeyboardButton(text="Написать в поддержку")],
+        ]
+    else:
+        keyboard = [
+            [mini_app_button()],
+            [KeyboardButton(text="Меню"), KeyboardButton(text="Профиль")],
+            [KeyboardButton(text="Написать в поддержку")],
+        ]
+
     return ReplyKeyboardMarkup(
-        keyboard=[
-            first_row,
-            [KeyboardButton(text="Заказы"), KeyboardButton(text="Профиль")],
-        ],
+        keyboard=keyboard,
         resize_keyboard=True,
         input_field_placeholder="Выберите действие",
     )

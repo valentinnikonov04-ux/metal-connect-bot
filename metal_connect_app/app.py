@@ -204,7 +204,7 @@ async def finish_profile(message: Message, uid: int, data: dict):
             (uid, file["file_id"], file["file_type"], file.get("caption", ""), now_iso()),
         )
     state.pop(uid, None)
-    await message.answer("Профиль сохранен.", reply_markup=main_keyboard())
+    await message.answer("Профиль сохранен.", reply_markup=main_keyboard(data.get("role")))
     await send_menu(message.chat.id, uid)
 
 
@@ -388,14 +388,62 @@ async def send_top(message: Message):
     await message.answer("\n".join(lines))
 
 
+async def start_order_flow(message: Message):
+    user = get_user(message.from_user.id)
+    if user and user["role"] == "executor":
+        await message.answer(
+            "Создавать заказы могут заказчики. Если вы хотите искать работу, нажмите «Новые/актуальные заказы»."
+        )
+        return
+    state[message.from_user.id] = {"flow": "order", "step": "title", "files": []}
+    await message.answer("Название заказа. Например: Фрезеровка плит 09Г2С, 30 шт.")
+
+
+async def start_support_flow(message: Message, user_id: Optional[int] = None):
+    uid = user_id or message.from_user.id
+    state[uid] = {"flow": "support", "step": "message"}
+    await message.answer("Опишите проблему, вопрос или идею. Я передам сообщение администратору.")
+
+
+async def show_my_offers(message: Message, user_id: int):
+    rows = db_all(
+        """
+        SELECT o.id AS offer_id, o.price, o.deadline, o.status AS offer_status,
+               orders.id AS order_id, orders.title, orders.status AS order_status
+        FROM offers o
+        JOIN orders ON orders.id=o.order_id
+        WHERE o.executor_id=?
+        ORDER BY o.id DESC
+        LIMIT 20
+        """,
+        (user_id,),
+    )
+    if not rows:
+        await message.answer("У вас пока нет откликов. Откройте актуальные заказы и отправьте первое предложение.")
+        return
+
+    for row in rows:
+        await message.answer(
+            f"Отклик #{row['offer_id']} на заказ #{row['order_id']}\n"
+            f"{row['title']}\n"
+            f"Цена: {row['price']}\n"
+            f"Срок: {row['deadline']}\n"
+            f"Статус заказа: {STATUS_LABELS.get(row['order_status'], row['order_status'])}",
+            reply_markup=InlineKeyboardMarkup(
+                inline_keyboard=[[InlineKeyboardButton(text="Открыть заказ", callback_data=f"order:view:{row['order_id']}")]]
+            ),
+        )
+
+
 @dp.message(Command("start"))
 async def start(message: Message):
     user = ensure_user(message)
+    user = get_user(message.from_user.id) or user
     await message.answer(
         f"{day_greeting()}, {first_name(user)}!\n\n"
         "Добро пожаловать в METAL CONNECT.\n"
         "Здесь заказчики размещают реальные задачи по металлообработке, а исполнители предлагают цену, срок и свои мощности напрямую.",
-        reply_markup=main_keyboard(),
+        reply_markup=main_keyboard(user["role"] if user else None),
     )
     await message.answer("Кем вы будете пользоваться ботом?", reply_markup=role_keyboard())
 
@@ -733,34 +781,7 @@ async def offer_position_callback(callback: CallbackQuery):
 @dp.callback_query(F.data == "offers:mine")
 async def my_offers(callback: CallbackQuery):
     ensure_user(callback)
-    rows = db_all(
-        """
-        SELECT o.id AS offer_id, o.price, o.deadline, o.status AS offer_status,
-               orders.id AS order_id, orders.title, orders.status AS order_status
-        FROM offers o
-        JOIN orders ON orders.id=o.order_id
-        WHERE o.executor_id=?
-        ORDER BY o.id DESC
-        LIMIT 20
-        """,
-        (callback.from_user.id,),
-    )
-    if not rows:
-        await callback.message.answer("У вас пока нет откликов.")
-        await callback.answer()
-        return
-
-    for row in rows:
-        await callback.message.answer(
-            f"Отклик #{row['offer_id']} на заказ #{row['order_id']}\n"
-            f"{row['title']}\n"
-            f"Цена: {row['price']}\n"
-            f"Срок: {row['deadline']}\n"
-            f"Статус заказа: {STATUS_LABELS.get(row['order_status'], row['order_status'])}",
-            reply_markup=InlineKeyboardMarkup(
-                inline_keyboard=[[InlineKeyboardButton(text="Открыть заказ", callback_data=f"order:view:{row['order_id']}")]]
-            ),
-        )
+    await show_my_offers(callback.message, callback.from_user.id)
     await callback.answer()
 
 
@@ -1185,8 +1206,7 @@ async def work_status_set(callback: CallbackQuery):
 @dp.callback_query(F.data == "support:start")
 async def support_start(callback: CallbackQuery):
     ensure_user(callback)
-    state[callback.from_user.id] = {"flow": "support", "step": "message"}
-    await callback.message.answer("Опишите проблему, я передам Администратору.")
+    await start_support_flow(callback.message, callback.from_user.id)
     await callback.answer()
 
 
@@ -1208,14 +1228,13 @@ async def text_menu(message: Message):
     await send_menu(message.chat.id, message.from_user.id)
 
 
-@dp.message(F.text.in_({"Новый заказ", "новый заказ"}))
+@dp.message(F.text.in_({"Создать заказ", "Новый заказ", "новый заказ"}))
 async def text_new_order(message: Message):
     ensure_user(message)
-    state[message.from_user.id] = {"flow": "order", "step": "title", "files": []}
-    await message.answer("Название заказа. Например: Фрезеровка плит 09Г2С, 30 шт.")
+    await start_order_flow(message)
 
 
-@dp.message(F.text.in_({"Заказы", "заказы"}))
+@dp.message(F.text.in_({"Мои заказы", "Заказы", "заказы"}))
 async def text_orders(message: Message):
     ensure_user(message)
     user = get_user(message.from_user.id)
@@ -1223,6 +1242,22 @@ async def text_orders(message: Message):
         await show_my_orders(message)
     else:
         await show_open_orders(message)
+
+
+@dp.message(F.text.in_({"Новые/актуальные заказы", "Актуальные заказы", "Новые заказы"}))
+async def text_open_orders(message: Message):
+    ensure_user(message)
+    await show_open_orders(message)
+
+
+@dp.message(F.text.in_({"Мои отклики/мои предложения", "Мои отклики", "Мои предложения"}))
+async def text_my_offers(message: Message):
+    ensure_user(message)
+    user = get_user(message.from_user.id)
+    if not user or user["role"] != "executor":
+        await message.answer("Отклики и предложения доступны исполнителям.")
+        return
+    await show_my_offers(message, message.from_user.id)
 
 
 @dp.message(F.text.in_({"/мойдень", "/мой_день"}))
@@ -1237,12 +1272,23 @@ async def text_top(message: Message):
     await send_top(message)
 
 
-@dp.message(F.text.in_({"Профиль", "профиль"}))
+@dp.message(F.text.in_({"Мой профиль", "Профиль", "профиль"}))
 async def text_profile(message: Message):
     ensure_user(message)
     user = get_user(message.from_user.id)
     await message.answer(profile_text(user))
     await send_profile_files(message, user)
+
+
+@dp.message(F.text.in_({"Написать в поддержку", "Поддержка"}))
+async def text_support(message: Message):
+    ensure_user(message)
+    await start_support_flow(message)
+
+
+@dp.message(F.text.in_({"Открыть Mini App", "Открыть мини приложение", "Mini App"}))
+async def text_mini_app(message: Message):
+    await command_app(message)
 
 
 @dp.message(F.web_app_data)
@@ -1267,7 +1313,11 @@ async def message_flow(message: Message):
     uid = message.from_user.id
     current = state.get(uid)
     if not current:
-        await message.answer("Выберите действие в меню.", reply_markup=main_keyboard())
+        user = get_user(uid)
+        await message.answer(
+            "Выберите действие в меню.",
+            reply_markup=main_keyboard(user["role"] if user else None),
+        )
         return
 
     flow = current["flow"]
