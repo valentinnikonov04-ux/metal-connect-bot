@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>METAL CONNECT</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <main class="app-shell">
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">METAL CONNECT</p>
+        <h1 id="welcomeTitle">Рабочий кабинет</h1>
+      </div>
+      <button class="icon-btn" id="supportBtn" type="button" aria-label="Поддержка">?</button>
+    </header>
+
+    <section class="role-switch" aria-label="Роль">
+      <button class="seg active" data-role="customer" type="button">Заказчик</button>
+      <button class="seg" data-role="executor" type="button">Исполнитель</button>
+      <button class="seg" data-role="admin" type="button">Админ</button>
+    </section>
+
+    <nav class="tabs" aria-label="Разделы">
+      <button class="tab active" data-view="dashboard" type="button">Обзор</button>
+      <button class="tab" data-view="order" type="button">Заказ</button>
+      <button class="tab" data-view="catalog" type="button">Каталог</button>
+      <button class="tab" data-view="map" type="button">Карта</button>
+      <button class="tab" data-view="chat" type="button">Чат</button>
+      <button class="tab" data-view="finance" type="button">Финансы</button>
+      <button class="tab" data-view="settings" type="button">Настройки</button>
+    </nav>
+
+    <section class="view active" id="dashboard">
+      <div class="grid widgets">
+        <article class="metric">
+          <span>Активные заказы</span>
+          <strong id="activeOrders">7</strong>
+          <small>2 ждут отклика</small>
+        </article>
+        <article class="metric">
+          <span>Предложения сегодня</span>
+          <strong id="todayOffers">14</strong>
+          <small>+5 за последний час</small>
+        </article>
+        <article class="metric">
+          <span>Средний чек</span>
+          <strong id="avgCheck">248k</strong>
+          <small>по вашим заказам</small>
+        </article>
+      </div>
+
+      <article class="panel">
+        <div class="panel-head">
+          <h2>Активность за неделю</h2>
+          <span class="badge">живой спрос</span>
+        </div>
+        <div class="bars" id="weekBars"></div>
+      </article>
+
+      <article class="panel split">
+        <div>
+          <h2>Следующий лучший шаг</h2>
+          <p id="nextStep">Добавьте фото или чертеж к заказу. Это повышает доверие исполнителей и ускоряет расчет.</p>
+        </div>
+        <button class="primary" data-go="order" type="button">Создать заказ</button>
+      </article>
+    </section>
+
+    <section class="view" id="order">
+      <article class="panel">
+        <div class="panel-head">
+          <h2>Конструктор заказа</h2>
+          <button class="ghost" id="useTemplateBtn" type="button">Взять шаблон</button>
+        </div>
+        <div class="form-grid">
+          <label>Название
+            <input id="orderTitle" type="text" placeholder="Фрезеровка плит 09Г2С, 30 шт.">
+          </label>
+          <label>Город
+            <input id="orderCity" type="text" placeholder="Москва">
+          </label>
+          <label>Бюджет
+            <input id="orderBudget" type="text" placeholder="до 250 000 руб.">
+          </label>
+          <label>Срок
+            <input id="orderDeadline" type="text" placeholder="10 рабочих дней">
+          </label>
+          <label class="wide">Оплата
+            <select id="orderPayment">
+              <option>Безнал, 50/50</option>
+              <option>100% предоплата</option>
+              <option>Постоплата</option>
+              <option>Наличные</option>
+            </select>
+          </label>
+          <label class="wide">Описание
+            <textarea id="orderDescription" rows="5" placeholder="Материал, количество, операции, важные условия"></textarea>
+          </label>
+        </div>
+      </article>
+
+      <article class="order-preview">
+        <div>
+          <p class="eyebrow">Предпросмотр</p>
+          <h2 id="previewTitle">Новый заказ</h2>
+          <p id="previewDescription">Заполните поля слева, и карточка заказа соберется автоматически.</p>
+        </div>
+        <dl>
+          <div><dt>Город</dt><dd id="previewCity">-</dd></div>
+          <div><dt>Бюджет</dt><dd id="previewBudget">-</dd></div>
+          <div><dt>Срок</dt><dd id="previewDeadline">-</dd></div>
+          <div><dt>Оплата</dt><dd id="previewPayment">-</dd></div>
+        </dl>
+        <button class="primary" id="publishOrderBtn" type="button">Опубликовать в боте</button>
+      </article>
+    </section>
+
+    <section class="view" id="catalog">
+      <article class="panel">
+        <div class="panel-head">
+          <h2>Каталог исполнителей</h2>
+          <span class="badge">проверка профиля</span>
+        </div>
+        <div class="filters">
+          <select id="cityFilter">
+            <option value="">Все города</option>
+            <option>Москва</option>
+            <option>Санкт-Петербург</option>
+            <option>Казань</option>
+            <option>Екатеринбург</option>
+          </select>
+          <select id="workFilter">
+            <option value="">Все работы</option>
+            <option value="токарка">Токарка</option>
+            <option value="фрезеровка">Фрезеровка</option>
+            <option value="сварка">Сварка</option>
+            <option value="лазер">Лазерная резка</option>
+          </select>
+          <label class="range">Рейтинг от <span id="ratingValue">4.0</span>
+            <input id="ratingFilter" type="range" min="3" max="5" step="0.1" value="4">
+          </label>
+        </div>
+      </article>
+      <div class="cards" id="executorCards"></div>
+    </section>
+
+    <section class="view" id="map">
+      <article class="map-panel">
+        <div class="map-canvas" id="mapCanvas"></div>
+        <aside>
+          <p class="eyebrow">Карта исполнителей</p>
+          <h2 id="mapTitle">Выберите метку</h2>
+          <p id="mapText">Здесь будет краткая карточка исполнителя, город, специализация и кнопка маршрута.</p>
+          <button class="primary" id="routeBtn" type="button">Проложить маршрут</button>
+        </aside>
+      </article>
+    </section>
+
+    <section class="view" id="chat">
+      <article class="messenger">
+        <header>
+          <div>
+            <h2>Чат по заказу #12</h2>
+            <p>Быстрые ответы и звонок через Telegram</p>
+          </div>
+          <button class="ghost" id="callBtn" type="button">Позвонить</button>
+        </header>
+        <div class="messages" id="messages"></div>
+        <div class="quick">
+          <button type="button">Можно чертеж?</button>
+          <button type="button">Готов посчитать сегодня</button>
+          <button type="button">Уточните материал</button>
+        </div>
+        <form class="chat-form" id="chatForm">
+          <input id="chatInput" type="text" placeholder="Написать сообщение">
+          <button class="primary" type="submit">Отправить</button>
+        </form>
+      </article>
+    </section>
+
+    <section class="view" id="finance">
+      <div class="grid widgets">
+        <article class="metric">
+          <span>Баланс</span>
+          <strong>0 ₽</strong>
+          <small>подключим после монетизации</small>
+        </article>
+        <article class="metric">
+          <span>Подписка</span>
+          <strong>Free</strong>
+          <small>будет Pro-тариф</small>
+        </article>
+      </div>
+      <article class="panel">
+        <h2>Монетизация</h2>
+        <p>Здесь подготовлены места под подписку, поднятие заказа, комиссии, платные отклики и вывод средств исполнителям.</p>
+        <button class="primary" type="button">Купить подписку</button>
+      </article>
+    </section>
+
+    <section class="view" id="settings">
+      <article class="panel">
+        <h2>Уведомления</h2>
+        <div class="settings-list">
+          <label><input type="checkbox" checked> Новые отклики</label>
+          <label><input type="checkbox" checked> Новые заказы по моей специализации</label>
+          <label><input type="checkbox"> Финансовые уведомления</label>
+          <label>Тихий час
+            <select>
+              <option>22:00 - 09:00</option>
+              <option>23:00 - 08:00</option>
+              <option>Выключен</option>
+            </select>
+          </label>
+        </div>
+      </article>
+      <article class="panel">
+        <h2>Справка и обучение</h2>
+        <p>Короткий туториал будет показывать, как разместить заказ, выбрать исполнителя и не потерять переписку.</p>
+        <button class="ghost" id="tutorialBtn" type="button">Показать подсказку</button>
+      </article>
+    </section>
+  </main>
+
+  <script src="./app.js"></script>
+</body>
+</html>

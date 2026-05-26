@@ -1,0 +1,414 @@
+:root {
+  --bg: #f4f6f8;
+  --surface: #ffffff;
+  --ink: #17212b;
+  --muted: #697684;
+  --line: #dbe2ea;
+  --accent: #1f8a70;
+  --accent-2: #2457a6;
+  --warn: #c77700;
+  --shadow: 0 12px 30px rgba(23, 33, 43, .08);
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+button, input, select, textarea {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+.app-shell {
+  width: min(1180px, 100%);
+  margin: 0 auto;
+  padding: 18px;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 6px 0 16px;
+}
+
+.eyebrow {
+  margin: 0 0 4px;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+h1, h2, p { margin-top: 0; }
+
+h1 {
+  margin-bottom: 0;
+  font-size: clamp(26px, 5vw, 40px);
+}
+
+h2 {
+  margin-bottom: 10px;
+  font-size: 20px;
+}
+
+.icon-btn, .ghost, .primary, .seg, .tab {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.icon-btn {
+  width: 42px;
+  height: 42px;
+  font-weight: 800;
+}
+
+.primary {
+  border: 0;
+  background: var(--accent);
+  color: #fff;
+  padding: 12px 16px;
+  font-weight: 750;
+}
+
+.ghost {
+  padding: 10px 14px;
+  background: #f8fafb;
+}
+
+.role-switch, .tabs {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 10px;
+}
+
+.seg, .tab {
+  min-height: 40px;
+  padding: 9px 13px;
+  white-space: nowrap;
+}
+
+.seg.active, .tab.active {
+  background: var(--ink);
+  color: #fff;
+  border-color: var(--ink);
+}
+
+.view {
+  display: none;
+  gap: 14px;
+}
+
+.view.active {
+  display: grid;
+}
+
+.grid {
+  display: grid;
+  gap: 12px;
+}
+
+.widgets {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.metric, .panel, .order-preview, .messenger, .map-panel {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+}
+
+.metric {
+  padding: 16px;
+}
+
+.metric span, .metric small, .panel p, dd {
+  color: var(--muted);
+}
+
+.metric strong {
+  display: block;
+  margin: 8px 0 4px;
+  font-size: 34px;
+}
+
+.panel, .order-preview {
+  padding: 18px;
+}
+
+.panel-head, .split {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 5px 9px;
+  border-radius: 999px;
+  background: #e9f5f1;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.bars {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  align-items: end;
+  gap: 8px;
+  height: 130px;
+}
+
+.bar {
+  display: grid;
+  align-items: end;
+  gap: 6px;
+  height: 100%;
+  color: var(--muted);
+  font-size: 12px;
+  text-align: center;
+}
+
+.bar i {
+  display: block;
+  min-height: 18px;
+  border-radius: 6px 6px 2px 2px;
+  background: linear-gradient(180deg, var(--accent-2), var(--accent));
+}
+
+#order {
+  grid-template-columns: minmax(0, 1.3fr) minmax(320px, .7fr);
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+label {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.wide {
+  grid-column: 1 / -1;
+}
+
+input, select, textarea {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfcfd;
+  color: var(--ink);
+  padding: 11px 12px;
+}
+
+textarea {
+  resize: vertical;
+}
+
+.order-preview {
+  display: grid;
+  align-content: start;
+  gap: 16px;
+}
+
+dl {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+}
+
+dl div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+dt {
+  color: var(--muted);
+}
+
+dd {
+  margin: 0;
+  text-align: right;
+  font-weight: 700;
+}
+
+.filters {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1.2fr;
+  gap: 12px;
+}
+
+.cards {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.executor-card {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+}
+
+.avatar {
+  width: 54px;
+  height: 54px;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  background: #e9eef5;
+  color: var(--accent-2);
+  font-weight: 900;
+}
+
+.tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.tag {
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: #f0f3f6;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.map-panel {
+  display: grid;
+  grid-template-columns: 1.4fr .6fr;
+  overflow: hidden;
+}
+
+.map-canvas {
+  position: relative;
+  min-height: 420px;
+  background:
+    linear-gradient(90deg, rgba(255,255,255,.5) 1px, transparent 1px),
+    linear-gradient(rgba(255,255,255,.5) 1px, transparent 1px),
+    #d7e4e8;
+  background-size: 48px 48px;
+}
+
+.pin {
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  border: 3px solid #fff;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 6px 16px rgba(0,0,0,.2);
+}
+
+.map-panel aside {
+  padding: 18px;
+}
+
+.messenger {
+  overflow: hidden;
+}
+
+.messenger header, .chat-form {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.messages {
+  display: grid;
+  gap: 10px;
+  min-height: 300px;
+  padding: 14px;
+  background: #edf2f5;
+}
+
+.bubble {
+  width: fit-content;
+  max-width: min(520px, 86%);
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.bubble.me {
+  justify-self: end;
+  background: #dff1ec;
+}
+
+.quick {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 10px 14px;
+}
+
+.quick button {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #fff;
+  padding: 8px 10px;
+  white-space: nowrap;
+}
+
+.chat-form {
+  border-top: 1px solid var(--line);
+  border-bottom: 0;
+}
+
+.settings-list {
+  display: grid;
+  gap: 12px;
+}
+
+@media (max-width: 860px) {
+  .widgets, #order, .cards, .map-panel, .filters {
+    grid-template-columns: 1fr;
+  }
+
+  .panel-head, .split, .messenger header, .chat-form {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .app-shell {
+    padding: 14px;
+  }
+}
