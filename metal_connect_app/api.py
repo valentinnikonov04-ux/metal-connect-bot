@@ -97,6 +97,44 @@ def body_json(handler):
     return json.loads(raw or "{}")
 
 
+def telegram_user_id(handler):
+    init_data = handler.headers.get("X-Telegram-Init-Data", "")
+    if not init_data:
+        return 0
+    try:
+        data = parse_qs(init_data)
+        user_values = data.get("user") or []
+        if not user_values:
+            return 0
+        user = json.loads(user_values[0])
+        return int(user.get("id") or 0)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return 0
+
+
+def request_user_id(handler, query=None, body=None):
+    if body and body.get("user_id"):
+        try:
+            return int(body.get("user_id") or 0)
+        except (TypeError, ValueError):
+            return 0
+    if query:
+        user_id = int_param(query, "user_id")
+        if user_id:
+            return user_id
+    return telegram_user_id(handler)
+
+
+def log_request(handler, method, path, user_id=0, body=None):
+    logging.info(
+        "API request method=%s path=%s user_id=%s body=%s",
+        method,
+        path,
+        user_id or "",
+        json.dumps(body or {}, ensure_ascii=False),
+    )
+
+
 def user_public(user):
     if not user:
         return None
@@ -298,20 +336,26 @@ def calendar(user_id):
     return {row["day"]: row["status"] for row in rows}
 
 
-def messages_for(user_id):
+def messages_for(user_id, order_id=0):
+    params = [user_id, user_id, user_id, user_id]
+    order_filter = ""
+    if order_id:
+        order_filter = "AND chat_messages.order_id=?"
+        params.append(order_id)
     return rows_dict(
         db_all(
-            """
+            f"""
             SELECT chat_messages.*
             FROM chat_messages
             JOIN orders ON orders.id=chat_messages.order_id
-            WHERE orders.customer_id=?
+            WHERE (orders.customer_id=?
                OR orders.selected_executor_id=?
                OR chat_messages.sender_id=?
-               OR chat_messages.receiver_id=?
+               OR chat_messages.receiver_id=?)
+              {order_filter}
             ORDER BY chat_messages.id
             """,
-            (user_id, user_id, user_id, user_id),
+            tuple(params),
         )
     )
 
@@ -385,14 +429,17 @@ class ApiHandler(BaseHTTPRequestHandler):
     server_version = "MetalConnectAPI/1.0"
 
     def do_OPTIONS(self):
+        parsed = urlparse(self.path)
+        log_request(self, "OPTIONS", parsed.path)
         self.send_json({})
 
     def do_GET(self):
         try:
             parsed = urlparse(self.path)
             query = parse_qs(parsed.query)
-            user_id = int_param(query, "user_id")
+            user_id = request_user_id(self, query=query)
             path = parsed.path
+            log_request(self, "GET", path, user_id)
 
             if path == "/api/me":
                 user = db_one("SELECT * FROM users WHERE id=?", (user_id,))
@@ -428,8 +475,11 @@ class ApiHandler(BaseHTTPRequestHandler):
             if path == "/api/calendar":
                 self.send_json({"calendar": calendar(user_id)})
                 return
-            if path == "/api/messages":
-                self.send_json({"messages": messages_for(user_id)})
+            if path == "/api/stats/executor":
+                self.send_json(executor_stats(user_id))
+                return
+            if path in {"/api/messages", "/api/chat/messages"}:
+                self.send_json({"messages": messages_for(user_id, int_param(query, "order_id"))})
                 return
             if path == "/api/get_ngrok_url":
                 url = public_api_url()
@@ -456,6 +506,8 @@ class ApiHandler(BaseHTTPRequestHandler):
             parsed = urlparse(self.path)
             body = body_json(self)
             path = parsed.path
+            user_id = request_user_id(self, body=body)
+            log_request(self, "POST", path, user_id, body)
 
             if path == "/api/orders/create":
                 order_id = db_execute(
@@ -466,7 +518,7 @@ class ApiHandler(BaseHTTPRequestHandler):
                     VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                     """,
                     (
-                        int(body["user_id"]),
+                        user_id,
                         body["title"].strip(),
                         body.get("desc") or body.get("description") or "",
                         body.get("budget") or "Договорной",
@@ -508,7 +560,7 @@ class ApiHandler(BaseHTTPRequestHandler):
                     """,
                     (
                         int(body["order_id"]),
-                        int(body["user_id"]),
+                        user_id,
                         str(body.get("price") or ""),
                         str(body.get("deadline") or body.get("deadline_days") or ""),
                         body.get("comment") or "",
@@ -519,7 +571,7 @@ class ApiHandler(BaseHTTPRequestHandler):
                 if not offer_id:
                     offer = db_one(
                         "SELECT id FROM offers WHERE order_id=? AND executor_id=?",
-                        (int(body["order_id"]), int(body["user_id"])),
+                        (int(body["order_id"]), user_id),
                     )
                     offer_id = offer["id"] if offer else None
                 self.send_json({"ok": True, "offer_id": offer_id})
@@ -552,33 +604,39 @@ class ApiHandler(BaseHTTPRequestHandler):
                 return
 
             if path == "/api/favorites/add":
+                path = "/api/favorites"
+            if path == "/api/favorites":
                 db_execute(
                     "INSERT OR IGNORE INTO favorites(user_id, target_id, created_at) VALUES(?,?,?)",
-                    (int(body["user_id"]), int(body["executor_id"]), now_iso()),
+                    (user_id, int(body["executor_id"]), now_iso()),
                 )
                 self.send_json({"ok": True})
                 return
 
             if path == "/api/portfolio/add":
+                path = "/api/portfolio"
+            if path == "/api/portfolio":
                 file_id = body.get("file_id") or body.get("photo_id") or ""
                 portfolio_id = db_execute(
                     """
                     INSERT INTO portfolio_files(executor_id, file_id, file_type, caption, created_at)
                     VALUES(?,?,?,?,?)
                     """,
-                    (int(body["user_id"]), file_id, body.get("file_type") or "photo", body.get("text") or body.get("caption") or "", now_iso()),
+                    (user_id, file_id, body.get("file_type") or "photo", body.get("text") or body.get("caption") or "", now_iso()),
                 )
                 self.send_json({"ok": True, "portfolio_id": portfolio_id})
                 return
 
             if path == "/api/calendar/set":
+                path = "/api/calendar"
+            if path == "/api/calendar":
                 db_execute(
                     """
                     INSERT INTO executor_calendar(user_id, day, status, updated_at)
                     VALUES(?,?,?,?)
                     ON CONFLICT(user_id, day) DO UPDATE SET status=excluded.status, updated_at=excluded.updated_at
                     """,
-                    (int(body["user_id"]), str(body["day"]), body.get("status") or "free", now_iso()),
+                    (user_id, str(body["day"]), body.get("status") or "free", now_iso()),
                 )
                 self.send_json({"ok": True})
                 return
@@ -599,18 +657,20 @@ class ApiHandler(BaseHTTPRequestHandler):
                         body.get("specialization"),
                         body.get("work_schedule") or body.get("work_status"),
                         now_iso(),
-                        int(body["user_id"]),
+                        user_id,
                     ),
                 )
                 self.send_json({"ok": True})
                 return
 
             if path == "/api/messages/create":
+                path = "/api/chat/messages"
+            if path == "/api/chat/messages":
                 order = db_one("SELECT * FROM orders WHERE id=?", (int(body["order_id"]),))
                 if not order:
                     self.send_error_json(404, "Order not found")
                     return
-                sender_id = int(body["user_id"])
+                sender_id = user_id
                 receiver_id = order["selected_executor_id"] if sender_id == order["customer_id"] else order["customer_id"]
                 if not receiver_id:
                     receiver_id = order["customer_id"]
@@ -633,15 +693,19 @@ class ApiHandler(BaseHTTPRequestHandler):
         try:
             parsed = urlparse(self.path)
             query = parse_qs(parsed.query)
-            if parsed.path == "/api/favorites/remove":
-                user_id = int_param(query, "user_id")
+            user_id = request_user_id(self, query=query)
+            log_request(self, "DELETE", parsed.path, user_id)
+            if parsed.path in {"/api/favorites/remove", "/api/favorites"}:
                 executor_id = int_param(query, "executor_id")
+                if not executor_id:
+                    executor_id = int_param(query, "target_id")
                 db_execute("DELETE FROM favorites WHERE user_id=? AND target_id=?", (user_id, executor_id))
                 self.send_json({"ok": True})
                 return
-            if parsed.path == "/api/portfolio/remove":
+            if parsed.path in {"/api/portfolio/remove", "/api/portfolio"}:
                 portfolio_id = int_param(query, "portfolio_id")
-                user_id = int_param(query, "user_id")
+                if not portfolio_id:
+                    portfolio_id = int_param(query, "id")
                 db_execute(
                     "DELETE FROM portfolio_files WHERE id=? AND executor_id=?",
                     (portfolio_id, user_id),
@@ -655,16 +719,21 @@ class ApiHandler(BaseHTTPRequestHandler):
 
     def send_json(self, data, status=200):
         raw = json.dumps(data, ensure_ascii=False).encode("utf-8")
-        origin = self.headers.get("Origin", "")
-        allow_origin = API_CORS_ORIGIN or "*"
-        if API_CORS_ORIGIN and origin == API_CORS_ORIGIN:
-            allow_origin = origin
+        allow_origin = "*"
+        logging.info(
+            "API response method=%s path=%s status=%s bytes=%s cors_origin=%s",
+            self.command,
+            urlparse(self.path).path,
+            status,
+            len(raw),
+            allow_origin,
+        )
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(raw)))
         self.send_header("Access-Control-Allow-Origin", allow_origin)
         self.send_header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type, X-Telegram-Init-Data")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, X-Telegram-Init-Data, ngrok-skip-browser-warning")
         self.send_header("Vary", "Origin")
         self.end_headers()
         self.wfile.write(raw)

@@ -1,8 +1,21 @@
+window.onerror = function(msg, url, line, col, error) {
+  console.log("Ошибка:", msg, "в", url, "строка", line);
+  debugLog("Ошибка: " + msg + " в " + url + " строка " + line, "error");
+  return false;
+};
+
 window.addEventListener("error", function (event) {
+  debugLog("Ошибка Mini App: " + (event.message || "неизвестная ошибка"), "error");
   var errorBox = document.createElement("div");
   errorBox.className = "error-box";
   errorBox.textContent = "Ошибка Mini App: " + (event.message || "неизвестная ошибка");
   document.body.appendChild(errorBox);
+});
+
+window.addEventListener("unhandledrejection", function (event) {
+  var message = event.reason && event.reason.message ? event.reason.message : String(event.reason || "неизвестная ошибка");
+  console.log("Ошибка:", message, "в Promise", "строка", 0);
+  debugLog("Ошибка Promise: " + message, "error");
 });
 
 var tg = window.Telegram && window.Telegram.WebApp ? window.Telegram.WebApp : null;
@@ -14,20 +27,28 @@ if (tg) {
 var $ = function (selector) { return document.querySelector(selector); };
 var $$ = function (selector) { return Array.prototype.slice.call(document.querySelectorAll(selector)); };
 var params = new URLSearchParams(window.location.search);
-var API_BASE = (params.get("api") || safeGet("mc_api_url", "")).replace(/\/$/, "");
-if (API_BASE.slice(-4) === "/api") API_BASE = API_BASE.slice(0, -4);
 var explicitUserId = params.get("user_id");
+var debugEnabled = params.get("debug") === "1" || safeGet("mc_debug", "") === "1";
+var API_BASE = "";
 
 var state = {
   role: normalizeRole(params.get("role") || safeGet("mc_role", "")),
   user: telegramUser(),
   view: "dashboardView",
   orderTab: "open",
+  statsPeriod: "month",
   material: "Сталь",
   selectedOrderId: null,
+  pendingCalendarDay: null,
   data: emptyData(),
   apiReady: false
 };
+
+debugLog("Загружен, ищу API...");
+API_BASE = resolveApiUrl();
+console.log("[MiniApp] API URL:", API_BASE || "");
+if (API_BASE) debugLog("API URL установлен: " + API_BASE);
+else debugLog("API не найден. Передайте ?api=URL", "error");
 
 var roleTabs = {
   customer: [
@@ -93,43 +114,107 @@ function greetingName() {
   return state.user.first_name || state.user.username || "Пользователь";
 }
 
+function resolveApiUrl() {
+  var raw = params.get("api") || window.DEFAULT_API_URL || "";
+  var normalized = normalizeApiUrl(raw);
+  if (normalized) safeSet("mc_api_url", normalized);
+  return normalized;
+}
+
+function normalizeApiUrl(value) {
+  var url = String(value || "").trim().replace(/\/$/, "");
+  if (url.slice(-4) === "/api") url = url.slice(0, -4);
+  return url;
+}
+
+function setApiUrl(value) {
+  API_BASE = normalizeApiUrl(value);
+  if (API_BASE) {
+    safeSet("mc_api_url", API_BASE);
+    debugLog("API URL установлен: " + API_BASE);
+    console.log("[MiniApp] API URL:", API_BASE);
+    updateApiTools();
+    loadData();
+    return true;
+  }
+  debugLog("API не найден. Передайте ?api=URL", "error");
+  updateApiTools();
+  return false;
+}
+
+function ensureApiConfigured() {
+  updateApiTools();
+  if (API_BASE) return true;
+  debugLog("API не найден. Передайте ?api=URL", "error");
+  return false;
+}
+
 function apiHeaders() {
-  var headers = { "Content-Type": "application/json" };
+  var headers = { "Content-Type": "application/json", "ngrok-skip-browser-warning": "1" };
   if (tg && tg.initData) headers["X-Telegram-Init-Data"] = tg.initData;
   return headers;
 }
 
+function apiRequestLog(method, url, body) {
+  debugLog("[API] REQUEST: " + method + " " + url + (body ? " " + JSON.stringify(body) : ""));
+}
+
+function apiResponseLog(response) {
+  debugLog("[API] RESPONSE: " + response.status, response.ok ? "info" : "error");
+}
+
 async function apiGet(path) {
   if (!API_BASE) throw new Error("API не настроен");
-  var response = await fetch(API_BASE + withUserId(path), { headers: apiHeaders() });
-  if (!response.ok) throw new Error("API " + response.status);
+  var url = API_BASE + withUserId(path);
+  apiRequestLog("GET", url);
+  var response = await fetch(url, { headers: apiHeaders() });
+  apiResponseLog(response);
+  if (!response.ok) throw new Error(await apiError(response));
   return response.json();
 }
 
 async function apiPost(path, body) {
   if (!API_BASE) throw new Error("API не настроен");
   body = withUserBody(body);
-  var response = await fetch(API_BASE + path, {
+  var url = API_BASE + path;
+  apiRequestLog("POST", url, body);
+  var response = await fetch(url, {
     method: "POST",
     headers: apiHeaders(),
     body: JSON.stringify(body || {})
   });
-  if (!response.ok) throw new Error("API " + response.status);
+  apiResponseLog(response);
+  if (!response.ok) throw new Error(await apiError(response));
   return response.json();
 }
 
 async function apiDelete(path) {
   if (!API_BASE) throw new Error("API не настроен");
-  var response = await fetch(API_BASE + withUserId(path), {
+  var url = API_BASE + withUserId(path);
+  apiRequestLog("DELETE", url);
+  var response = await fetch(url, {
     method: "DELETE",
     headers: apiHeaders()
   });
-  if (!response.ok) throw new Error("API " + response.status);
+  apiResponseLog(response);
+  if (!response.ok) throw new Error(await apiError(response));
   return response.json();
+}
+
+async function apiError(response) {
+  var text = "";
+  try {
+    var data = await response.json();
+    text = data.error || JSON.stringify(data);
+  } catch (error) {
+    text = await response.text();
+  }
+  return "API " + response.status + (text ? ": " + text : "");
 }
 
 function withUserId(path) {
   var userId = state.user.id || explicitUserId || "";
+  if (path.indexOf("user_id=") !== -1) return path;
   if (!userId) return path;
   return path + (path.indexOf("?") === -1 ? "?" : "&") + "user_id=" + encodeURIComponent(userId);
 }
@@ -141,6 +226,11 @@ function withUserBody(body) {
 }
 
 async function loadData() {
+  if (!ensureApiConfigured()) {
+    renderSkeleton();
+    renderAll();
+    return;
+  }
   if (!state.role) {
     renderRoleLocked();
     return;
@@ -155,6 +245,8 @@ async function loadData() {
     state.role = normalizeRole(data.role) || state.role;
     state.data = normalizeData(data);
   } catch (error) {
+    debugLog("LOAD ERROR " + error.message);
+    showToast("API ошибка: " + error.message);
     state.apiReady = false;
     state.data = emptyData();
   }
@@ -168,7 +260,8 @@ async function loadRoleData(role, me) {
     var executorOffers = await apiGet("/api/offers/executor");
     var executorPortfolio = await apiGet("/api/portfolio");
     var executorCalendar = await apiGet("/api/calendar");
-    var executorMessages = await apiGet("/api/messages");
+    var executorStats = await apiGet("/api/stats/executor?period=" + encodeURIComponent(state.statsPeriod));
+    var executorMessages = await apiGet("/api/chat/messages");
     return {
       role: "executor",
       dashboard: executorDashboard,
@@ -177,7 +270,7 @@ async function loadRoleData(role, me) {
       portfolio: executorPortfolio.portfolio || [],
       calendar: executorCalendar.calendar || {},
       messages: executorMessages.messages || [],
-      stats: executorDashboard.stats || {},
+      stats: executorStats || executorDashboard.stats || {},
       profile: me.user || {}
     };
   }
@@ -186,7 +279,7 @@ async function loadRoleData(role, me) {
   var customerOffers = await apiGet("/api/offers/customer");
   var favorites = await apiGet("/api/favorites");
   var executors = await apiGet("/api/executors");
-  var customerMessages = await apiGet("/api/messages");
+  var customerMessages = await apiGet("/api/chat/messages");
   return {
     role: "customer",
     dashboard: customerDashboard,
@@ -417,6 +510,7 @@ function orderPayload() {
 
 async function publishOrder() {
   var payload = orderPayload();
+  debugLog("CLICK publishOrder");
   if (!payload.title || !payload.description || !payload.quantity || !payload.budget || !payload.city || !payload.deadline) {
     showToast("Заполните название, описание, количество, город, срок и бюджет.");
     return;
@@ -426,12 +520,18 @@ async function publishOrder() {
     return;
   }
   try {
+    if ($("#orderFiles").files && $("#orderFiles").files[0]) {
+      payload.file_id = await readFileAsDataUrl($("#orderFiles").files[0]);
+      payload.file_type = "image_data";
+      debugLog("ORDER file attached name=" + $("#orderFiles").files[0].name);
+    }
     if (API_BASE) await apiPost("/api/orders/create", payload);
     else if (tg && tg.sendData) tg.sendData(JSON.stringify(payload));
     showToast("Заказ отправлен.");
     await loadData();
   } catch (error) {
-    showToast("Не удалось отправить заказ. Проверьте API.");
+    debugLog("ORDER ERROR " + error.message);
+    showToast("Не удалось отправить заказ: " + error.message);
   }
 }
 
@@ -556,6 +656,9 @@ function renderChat() {
   $("#chatOrderTitle").textContent = order ? order.title : "Не выбран";
   $("#chatOrderMeta").textContent = order ? [order.city, order.quantity ? order.quantity + " шт." : "", order.budget].filter(Boolean).join(" · ") : "Откройте чат из карточки заказа";
   $("#chatTitle").textContent = order ? "Чат по заказу #" + order.id : "Чат по заказу";
+  $("#chatMeta").textContent = order ? "История сообщений по выбранному заказу." : "Сообщения загружаются только по конкретному заказу.";
+  $("#chatInput").disabled = !order;
+  $("#chatForm button").disabled = !order;
   var messages = state.selectedOrderId ? (state.data.messages || []).filter(function (message) { return String(message.order_id) === String(state.selectedOrderId); }) : [];
   $("#messages").innerHTML = messages.map(function (message) {
     var me = String(message.sender_id) === String(state.user.id);
@@ -579,8 +682,9 @@ function renderCalendar() {
   var labels = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
   var cells = labels.map(function (label) { return '<div class="calendar-label">' + label + '</div>'; });
   for (var day = 1; day <= daysInMonth; day += 1) {
-    var status = (state.data.calendar || {})[day] || "free";
-    cells.push('<button class="day ' + h(status) + '" data-action="calendar-day" data-day="' + day + '" type="button"><b>' + day + '</b><span>' + h(dayLabel(status)) + '</span></button>');
+    var dateKey = calendarDateKey(now, day);
+    var status = (state.data.calendar || {})[dateKey] || (state.data.calendar || {})[day] || "free";
+    cells.push('<button class="day ' + h(status) + '" data-action="calendar-day" data-day="' + h(dateKey) + '" type="button" aria-label="' + h(day + " " + dayLabel(status)) + '"><b>' + day + '</b><span>' + h(dayLabel(status)) + '</span></button>');
   }
   $("#calendarGrid").innerHTML = cells.join("");
 }
@@ -588,7 +692,10 @@ function renderCalendar() {
 function renderPortfolio() {
   var rows = state.data.portfolio || [];
   $("#portfolioGrid").innerHTML = rows.map(function (item) {
-    return '<article class="portfolio-card steel"><div></div><h3>' + h(item.title || "Работа") + '</h3><p>' + h(item.description || item.equipment || "") + '</p><button class="ghost" data-action="remove-portfolio" data-item="' + h(item.id) + '" type="button">Удалить</button></article>';
+    var preview = item.file_id && String(item.file_id).indexOf("data:image/") === 0
+      ? '<img src="' + h(item.file_id) + '" alt="">'
+      : '<span>' + h(item.file_id || "Фото") + '</span>';
+    return '<article class="portfolio-card steel"><div>' + preview + '</div><h3>' + h(item.title || "Работа") + '</h3><p>' + h(item.description || item.equipment || "") + '</p><button class="ghost" data-action="remove-portfolio" data-item="' + h(item.id) + '" type="button">Удалить</button></article>';
   }).join("") || emptyPanel("Портфолио пустое", "Добавьте фото работ, описание оборудования и станков.");
   $("#reviewsList").innerHTML = (state.data.reviews || []).map(function (review) {
     return '<article class="order-card"><div class="card-head"><h3>' + h(review.author || "Заказчик") + '</h3><span class="status done">' + h(review.stars || 0) + ' ★</span></div><p>' + h(review.text || "") + '</p></article>';
@@ -598,6 +705,13 @@ function renderPortfolio() {
 function renderStats() {
   var s = state.data.stats || {};
   $("#financeTotal").textContent = money(s.total_earned || 0);
+  if ($("#statsFilters")) $("#statsFilters").innerHTML = [
+    ["week", "Неделя"],
+    ["month", "Месяц"],
+    ["year", "Год"]
+  ].map(function (item) {
+    return '<button class="subtab ' + (state.statsPeriod === item[0] ? "active" : "") + '" data-action="stats-period" data-period="' + item[0] + '" type="button">' + item[1] + '</button>';
+  }).join("");
   $("#statsMetrics").innerHTML = [
     ["Заказов выполнено", number(s.completed_orders), "по базе"],
     ["Средний чек", money(s.average_check || 0), "по завершенным"],
@@ -657,7 +771,8 @@ async function submitOffer(event) {
     showToast("Предложение отправлено.");
     await loadData();
   } catch (error) {
-    showToast("Не удалось отправить предложение. Проверьте API.");
+    debugLog("OFFER ERROR " + error.message);
+    showToast("Не удалось отправить предложение: " + error.message);
   }
 }
 
@@ -675,6 +790,9 @@ function clearOrderForm() {
 }
 
 function initEvents() {
+  document.addEventListener("click", logInternalClick, true);
+  document.addEventListener("submit", logInternalSubmit, true);
+  attachStaticButtonLogs();
   $$(".material").forEach(function (button) {
     button.addEventListener("click", function () {
       state.material = button.dataset.material;
@@ -697,6 +815,10 @@ function initEvents() {
     $("#offerComment").value = "Готов рассчитать после уточнения чертежа и материала.";
   });
   $("#portfolioAddBtn").addEventListener("click", addPortfolio);
+  $("#portfolioPhoto").addEventListener("change", function () {
+    var file = $("#portfolioPhoto").files && $("#portfolioPhoto").files[0];
+    debugLog("INPUT portfolioPhoto file=" + (file ? file.name : ""));
+  });
   $("#sharePortfolioBtn").addEventListener("click", function () { showToast("Ссылка на портфолио появится после подключения API."); });
   $("#chatForm").addEventListener("submit", sendChatMessage);
   $("#supportBtn").addEventListener("click", function () {
@@ -704,26 +826,38 @@ function initEvents() {
     else showToast("Поддержка откроется внутри Telegram.");
   });
   $("#attachBtn").addEventListener("click", function () { showToast("Загрузка фото подключается через файловый API."); });
+  $("#checkApiBtn").addEventListener("click", checkApi);
+  $("#manualApiSaveBtn").addEventListener("click", function () {
+    setApiUrl($("#manualApiUrl").value);
+  });
   document.addEventListener("click", handleActionClick);
+  updateApiTools();
 }
 
 async function sendChatMessage(event) {
   event.preventDefault();
+  debugLog("SUBMIT chatForm order_id=" + (state.selectedOrderId || ""));
   var text = $("#chatInput").value.trim();
-  if (!text || !state.selectedOrderId) return;
+  if (!state.selectedOrderId) {
+    showToast("Сначала выберите заказ для чата.");
+    return;
+  }
+  if (!text) return;
   try {
-    await apiPost("/api/messages/create", { order_id: state.selectedOrderId, text: text });
+    await apiPost("/api/chat/messages", { order_id: state.selectedOrderId, text: text });
     $("#chatInput").value = "";
-    await loadData();
+    await loadChatMessages(state.selectedOrderId);
     setView("chatView");
   } catch (error) {
-    showToast("Не удалось отправить сообщение. Проверьте API.");
+    debugLog("CHAT ERROR " + error.message);
+    showToast("Не удалось отправить сообщение: " + error.message);
   }
 }
 
 async function handleActionClick(event) {
   var button = event.target.closest("[data-go], [data-action]");
   if (!button) return;
+  debugLog("CLICK action=" + (button.dataset.action || "") + " go=" + (button.dataset.go || "") + " id=" + (button.id || ""));
   if (button.dataset.go) {
     setView(button.dataset.go);
     return;
@@ -732,28 +866,43 @@ async function handleActionClick(event) {
   if (action === "open-offer") openOffer(button.dataset.order);
   if (action === "select-chat" || action === "view-offers") {
     state.selectedOrderId = button.dataset.order;
+    if (action === "select-chat") await loadChatMessages(state.selectedOrderId);
     setView(action === "view-offers" ? "offersView" : "chatView");
   }
   if (action === "complete-order") await actionPost("/api/orders/complete", { order_id: button.dataset.order });
   if (action === "accept-offer") await actionPost("/api/offers/accept", offerAcceptPayload(button.dataset.offer));
   if (action === "decline-offer") await actionPost("/api/offers/decline", { offer_id: button.dataset.offer });
   if (action === "favorite") await actionPost("/api/favorites/add", { executor_id: button.dataset.executor });
-  if (action === "remove-favorite") await actionDelete("/api/favorites/remove?executor_id=" + encodeURIComponent(button.dataset.executor));
-  if (action === "calendar-day") await setCalendarDay(button.dataset.day);
+  if (action === "remove-favorite") await actionDelete("/api/favorites?executor_id=" + encodeURIComponent(button.dataset.executor));
+  if (action === "calendar-day") openCalendarStatusMenu(button.dataset.day);
+  if (action === "calendar-status") await setCalendarDay(state.pendingCalendarDay, button.dataset.status);
+  if (action === "calendar-cancel") closeCalendarStatusMenu();
   if (action === "save-profile") await saveProfile();
-  if (action === "remove-portfolio") await actionDelete("/api/portfolio/remove?portfolio_id=" + encodeURIComponent(button.dataset.item));
+  if (action === "remove-portfolio") await actionDelete("/api/portfolio?portfolio_id=" + encodeURIComponent(button.dataset.item));
+  if (action === "choose-portfolio-photo") $("#portfolioPhoto").click();
+  if (action === "stats-period") await setStatsPeriod(button.dataset.period);
 }
 
 async function addPortfolio() {
   var fileId = $("#portfolioFileId").value.trim();
   var text = $("#portfolioText").value.trim();
-  if (!fileId || !text) {
-    showToast("Укажите file_id и описание.");
+  var fileInput = $("#portfolioPhoto");
+  if (!text) {
+    showToast("Заполните описание работы, оборудование или станок.");
     return;
   }
-  await actionPost("/api/portfolio/add", { file_id: fileId, text: text });
+  if (!fileId && fileInput && fileInput.files && fileInput.files[0]) {
+    fileId = await readFileAsDataUrl(fileInput.files[0]);
+  }
+  if (!fileId) {
+    showToast("Добавьте фото или укажите file_id.");
+    return;
+  }
+  debugLog("SUBMIT portfolio file=" + (fileId ? "yes" : "no") + " text_length=" + text.length);
+  await actionPost("/api/portfolio/add", { file_id: fileId, text: text, file_type: fileId.indexOf("data:image/") === 0 ? "image_data" : "photo" });
   $("#portfolioFileId").value = "";
   $("#portfolioText").value = "";
+  if (fileInput) fileInput.value = "";
 }
 
 async function actionPost(path, body) {
@@ -761,7 +910,8 @@ async function actionPost(path, body) {
     await apiPost(path, body);
     await loadData();
   } catch (error) {
-    showToast("Действие не выполнено. Проверьте API.");
+    debugLog("ACTION ERROR " + error.message);
+    showToast("Действие не выполнено: " + error.message);
   }
 }
 
@@ -770,7 +920,8 @@ async function actionDelete(path) {
     await apiDelete(path);
     await loadData();
   } catch (error) {
-    showToast("Действие не выполнено. Проверьте API.");
+    debugLog("DELETE ERROR " + error.message);
+    showToast("Действие не выполнено: " + error.message);
   }
 }
 
@@ -783,10 +934,59 @@ function offerAcceptPayload(offerId) {
   };
 }
 
-async function setCalendarDay(day) {
-  var current = (state.data.calendar || {})[day] || "free";
-  var next = { free: "partial", partial: "busy", busy: "reserve", reserve: "free" }[current] || "free";
-  await actionPost("/api/calendar/set", { day: day, status: next });
+function openCalendarStatusMenu(day) {
+  state.pendingCalendarDay = day;
+  $("#calendarStatusDate").textContent = formatDateRu(day);
+  if ($("#calendarStatusModal").showModal) $("#calendarStatusModal").showModal();
+  else $("#calendarStatusModal").setAttribute("open", "");
+}
+
+function closeCalendarStatusMenu() {
+  state.pendingCalendarDay = null;
+  if ($("#calendarStatusModal").close) $("#calendarStatusModal").close();
+  else $("#calendarStatusModal").removeAttribute("open");
+}
+
+async function setCalendarDay(day, status) {
+  if (!day || !status) return;
+  state.data.calendar[day] = status;
+  renderCalendar();
+  closeCalendarStatusMenu();
+  await actionPost("/api/calendar/set", { day: day, status: status });
+}
+
+async function setStatsPeriod(period) {
+  state.statsPeriod = period || "month";
+  debugLog("CLICK stats-period=" + state.statsPeriod);
+  try {
+    state.data.stats = await apiGet("/api/stats/executor?period=" + encodeURIComponent(state.statsPeriod));
+    renderStats();
+  } catch (error) {
+    debugLog("STATS ERROR " + error.message);
+    showToast("Не удалось загрузить статистику: " + error.message);
+  }
+}
+
+function formatDateRu(day) {
+  if (!day) return "";
+  var parts = String(day).split("-");
+  if (parts.length !== 3) return day;
+  return parts[2] + "." + parts[1] + "." + parts[0];
+}
+
+function calendarDateKey(date, day) {
+  var month = String(date.getMonth() + 1).padStart(2, "0");
+  var dayText = String(day).padStart(2, "0");
+  return date.getFullYear() + "-" + month + "-" + dayText;
+}
+
+function readFileAsDataUrl(file) {
+  return new Promise(function (resolve, reject) {
+    var reader = new FileReader();
+    reader.onload = function () { resolve(reader.result); };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
 }
 
 async function saveProfile() {
@@ -794,11 +994,83 @@ async function saveProfile() {
   $$("[data-profile]").forEach(function (input) {
     payload[input.dataset.profile] = input.value.trim();
   });
+  delete payload.rating;
+  delete payload.customer_type;
+  delete payload.name;
+  debugLog("SUBMIT profile " + JSON.stringify(payload));
   await actionPost("/api/profile/update", payload);
 }
 
 function findOrder(id) {
-  return (state.data.orders || []).find(function (order) { return String(order.id) === String(id); });
+  var order = (state.data.orders || []).find(function (item) { return String(item.id) === String(id); });
+  if (order) return order;
+  var offer = (state.data.offers || []).find(function (item) { return String(item.order_id) === String(id); });
+  if (!offer) return null;
+  return {
+    id: offer.order_id,
+    title: offer.order_title || "Заказ",
+    city: offer.city || "",
+    budget: offer.budget || offer.price || ""
+  };
+}
+
+async function loadChatMessages(orderId) {
+  if (!orderId) return;
+  try {
+    var data = await apiGet("/api/chat/messages?order_id=" + encodeURIComponent(orderId));
+    state.data.messages = data.messages || [];
+    debugLog("LOAD chat order_id=" + orderId + " messages=" + state.data.messages.length);
+  } catch (error) {
+    debugLog("CHAT LOAD ERROR " + error.message);
+    showToast("Не удалось загрузить чат: " + error.message);
+  }
+}
+
+function logInternalClick(event) {
+  var target = event.target.closest("button, input, select, textarea, [data-action], [data-go]");
+  if (!target) return;
+  var name = buttonName(target);
+  debugLog("Кнопка " + name + " нажата");
+  debugLog("EVENT click tag=" + target.tagName.toLowerCase() + " id=" + (target.id || "") + " action=" + (target.dataset ? target.dataset.action || "" : ""));
+}
+
+function logInternalSubmit(event) {
+  debugLog("EVENT submit id=" + (event.target.id || ""));
+}
+
+function attachStaticButtonLogs() {
+  $$("button").forEach(function (button) {
+    if (button.dataset.staticLogBound === "1") return;
+    button.dataset.staticLogBound = "1";
+    button.addEventListener("click", function () {
+      debugLog("STATIC button listener: " + buttonName(button));
+    });
+  });
+}
+
+function buttonName(button) {
+  return button.id || (button.dataset && (button.dataset.action || button.dataset.go)) || button.textContent.trim() || "без имени";
+}
+
+function updateApiTools() {
+  var panel = $("#apiMissingPanel");
+  var input = $("#manualApiUrl");
+  if (panel) panel.hidden = !!API_BASE;
+  if (input && !input.value) input.value = API_BASE || "";
+}
+
+async function checkApi() {
+  debugLog("Кнопка Проверить API нажата");
+  if (!ensureApiConfigured()) return;
+  var testUserId = state.user.id || explicitUserId || "1";
+  try {
+    var data = await apiGet("/api/me?user_id=" + encodeURIComponent(testUserId));
+    debugLog("Проверка API OK: " + JSON.stringify(data));
+    showToast("API отвечает.");
+  } catch (error) {
+    debugLog("Проверка API ошибка: " + error.message, "error");
+    showToast("API ошибка: " + error.message);
+  }
 }
 
 function statusLabel(status) {
@@ -852,8 +1124,32 @@ function sum(values) {
 }
 
 function showToast(message) {
+  debugLog("TOAST " + message);
   if (tg && tg.showPopup) tg.showPopup({ message: message });
   else window.alert(message);
+}
+
+function debugLog(message, level) {
+  level = level || "info";
+  if (window.console && console.log) {
+    if (level === "error" && console.error) console.error("[MiniApp]", message);
+    else console.log("[MiniApp]", message);
+  }
+  if (!debugEnabled) return;
+  if (typeof $ !== "function" || !document.body) return;
+  var box = $("#debugConsole");
+  if (!box) {
+    box = document.createElement("div");
+    box.id = "debugConsole";
+    box.className = "debug-console";
+    document.body.appendChild(box);
+  }
+  var line = document.createElement("div");
+  line.className = level === "error" ? "debug-line error" : "debug-line";
+  line.textContent = new Date().toLocaleTimeString("ru-RU") + " " + message;
+  box.appendChild(line);
+  while (box.children.length > 30) box.removeChild(box.firstChild);
+  box.scrollTop = box.scrollHeight;
 }
 
 function safeGet(key, fallback) {

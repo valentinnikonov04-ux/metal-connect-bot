@@ -26,6 +26,10 @@ body {
 
 button, input, select, textarea { font: inherit; }
 button { cursor: pointer; }
+button:disabled, input:disabled {
+  cursor: not-allowed;
+  opacity: .55;
+}
 h1, h2, h3, p { margin-top: 0; }
 h1 { margin-bottom: 0; font-size: 26px; line-height: 1.12; }
 h2 { margin-bottom: 10px; font-size: 20px; line-height: 1.2; }
@@ -36,6 +40,21 @@ p { color: var(--muted); line-height: 1.45; }
   width: min(1180px, 100%);
   margin: 0 auto;
   padding: 16px;
+}
+
+.test-button {
+  position: fixed;
+  left: 10px;
+  bottom: 10px;
+  z-index: 10001;
+  min-height: 36px;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--ink);
+  font-weight: 850;
+  box-shadow: 0 8px 18px rgba(24, 33, 43, .12);
 }
 
 .topbar {
@@ -99,6 +118,7 @@ p { color: var(--muted); line-height: 1.45; }
 
 .primary:hover { background: var(--accent-dark); }
 .primary.small { min-height: 36px; padding: 8px 12px; }
+.ghost.small { min-height: 36px; padding: 8px 12px; }
 
 .ghost {
   padding: 10px 12px;
@@ -633,6 +653,10 @@ dd {
 
 .day b { font-size: 18px; }
 .day span { color: var(--muted); font-size: 12px; }
+.day.free { border-color: #b9dfd1; background: #edf8f4; }
+.day.busy { border-color: #e0a297; background: #fff3f0; }
+.day.partial { border-color: #f0c36b; background: #fff8e8; }
+.day.reserve { border-color: #9eb9d5; background: #edf4fb; }
 .day.work { border-color: #f0c36b; background: #fff8e8; }
 .day.offer { border-color: #a9c2e0; background: #eef5fc; }
 .day.done { border-color: #9bd0c0; background: #eaf7f2; }
@@ -655,6 +679,8 @@ dd {
 }
 
 .portfolio-card div {
+  display: grid;
+  place-items: center;
   min-height: 76px;
   margin-bottom: 20px;
   border: 1px solid rgba(255,255,255,.35);
@@ -663,6 +689,20 @@ dd {
     linear-gradient(90deg, rgba(255,255,255,.18) 1px, transparent 1px),
     linear-gradient(rgba(255,255,255,.18) 1px, transparent 1px);
   background-size: 14px 14px;
+}
+
+.portfolio-card img {
+  width: 100%;
+  height: 120px;
+  object-fit: cover;
+  border-radius: 6px;
+}
+
+.portfolio-card span {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  color: rgba(255,255,255,.82);
+  font-size: 12px;
 }
 
 .portfolio-card h3, .portfolio-card p { color: #fff; }
@@ -722,6 +762,20 @@ dd {
 .modal-actions { justify-content: space-between; }
 .empty { box-shadow: none; }
 
+.status-menu {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.file-input-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+}
+
 .error-box {
   position: fixed;
   left: 12px;
@@ -734,6 +788,62 @@ dd {
   background: #fff3f0;
   color: #8a1f11;
   font: 14px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.debug-console {
+  position: fixed;
+  left: 8px;
+  right: 8px;
+  bottom: 8px;
+  z-index: 10000;
+  max-height: 34vh;
+  overflow: auto;
+  padding: 8px;
+  border: 1px solid rgba(24,33,43,.22);
+  border-radius: 8px;
+  background: rgba(255,255,255,.96);
+  color: #18212b;
+  font: 11px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  box-shadow: 0 12px 40px rgba(24,33,43,.18);
+}
+
+.debug-line.error {
+  color: #b64a3a;
+  font-weight: 800;
+}
+
+.api-tools {
+  position: fixed;
+  right: 10px;
+  bottom: 10px;
+  z-index: 9998;
+  display: grid;
+  gap: 8px;
+  width: min(360px, calc(100vw - 20px));
+  pointer-events: none;
+}
+
+.api-tools > * {
+  pointer-events: auto;
+}
+
+.api-error {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid #e0a297;
+  border-radius: 8px;
+  background: #fff3f0;
+  color: #8a1f11;
+  box-shadow: 0 12px 40px rgba(24,33,43,.18);
+}
+
+.api-error[hidden] { display: none; }
+
+.api-manual {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
 }
 
 .empty-inline {
