@@ -1,4 +1,6 @@
 .env
+.ngrok_url
+ngrok
 *.db
 *.sqlite
 *.sqlite3

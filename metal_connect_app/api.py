@@ -1,6 +1,7 @@
 import json
 import logging
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from metal_connect_app.config import API_CORS_ORIGIN, API_HOST, API_PORT
@@ -22,6 +23,39 @@ OFFER_TO_API = {
     "declined": "declined",
 }
 OFFER_FROM_API = {value: key for key, value in OFFER_TO_API.items()}
+NGROK_URL_PATH = Path(".ngrok_url")
+CURRENT_NGROK_URL = ""
+
+
+def clean_public_url(value):
+    url = (value or "").strip().rstrip("/")
+    if not url.startswith("https://"):
+        raise ValueError("URL must start with https://")
+    return url
+
+
+def load_ngrok_url():
+    global CURRENT_NGROK_URL
+    if NGROK_URL_PATH.exists():
+        CURRENT_NGROK_URL = NGROK_URL_PATH.read_text(encoding="utf-8").strip()
+    return CURRENT_NGROK_URL
+
+
+def set_ngrok_url(value):
+    global CURRENT_NGROK_URL
+    CURRENT_NGROK_URL = clean_public_url(value)
+    NGROK_URL_PATH.write_text(CURRENT_NGROK_URL + "\n", encoding="utf-8")
+    logging.info("Ngrok URL обновлён: %s", CURRENT_NGROK_URL)
+    return CURRENT_NGROK_URL
+
+
+def public_api_url():
+    return CURRENT_NGROK_URL or load_ngrok_url()
+
+
+def github_redirect_uri(path="/api/github/callback"):
+    base_url = public_api_url()
+    return f"{base_url}{path}" if base_url else ""
 
 
 def row_dict(row):
@@ -397,6 +431,13 @@ class ApiHandler(BaseHTTPRequestHandler):
             if path == "/api/messages":
                 self.send_json({"messages": messages_for(user_id)})
                 return
+            if path == "/api/get_ngrok_url":
+                url = public_api_url()
+                self.send_json({
+                    "url": url,
+                    "github_redirect_uri": github_redirect_uri(),
+                })
+                return
             if path == "/api/bootstrap":
                 role = (query.get("role") or [""])[0]
                 if role not in {"customer", "executor"}:
@@ -442,6 +483,15 @@ class ApiHandler(BaseHTTPRequestHandler):
                     ),
                 )
                 self.send_json({"ok": True, "order_id": order_id})
+                return
+
+            if path == "/api/set_ngrok_url":
+                url = set_ngrok_url(body.get("url"))
+                self.send_json({
+                    "ok": True,
+                    "url": url,
+                    "github_redirect_uri": github_redirect_uri(),
+                })
                 return
 
             if path == "/api/offers/create":
@@ -629,6 +679,7 @@ class ApiHandler(BaseHTTPRequestHandler):
 def run_api():
     logging.basicConfig(level=logging.INFO)
     init_db()
+    load_ngrok_url()
     server = ThreadingHTTPServer((API_HOST, API_PORT), ApiHandler)
     logging.info("METAL CONNECT API started on http://%s:%s", API_HOST, API_PORT)
     server.serve_forever()
