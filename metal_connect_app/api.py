@@ -3,7 +3,7 @@ import logging
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
-from metal_connect_app.config import API_HOST, API_PORT
+from metal_connect_app.config import API_CORS_ORIGIN, API_HOST, API_PORT
 from metal_connect_app.database import db_all, db_execute, db_one, init_db
 from metal_connect_app.services import now_iso, user_rating
 
@@ -605,12 +605,17 @@ class ApiHandler(BaseHTTPRequestHandler):
 
     def send_json(self, data, status=200):
         raw = json.dumps(data, ensure_ascii=False).encode("utf-8")
+        origin = self.headers.get("Origin", "")
+        allow_origin = API_CORS_ORIGIN or "*"
+        if API_CORS_ORIGIN and origin == API_CORS_ORIGIN:
+            allow_origin = origin
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(raw)))
-        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Origin", allow_origin)
         self.send_header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type, X-Telegram-Init-Data")
+        self.send_header("Vary", "Origin")
         self.end_headers()
         self.wfile.write(raw)
 

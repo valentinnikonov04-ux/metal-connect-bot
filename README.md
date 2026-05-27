@@ -16,6 +16,7 @@ cp .env.example .env
 METAL_CONNECT_BOT_TOKEN=your_telegram_bot_token
 METAL_CONNECT_WEBAPP_URL=https://your-public-mini-app-url.example
 METAL_CONNECT_API_URL=https://your-api-domain.example
+METAL_CONNECT_API_CORS_ORIGIN=https://your-github-name.github.io
 METAL_CONNECT_SUPPORT_ADMIN_USERNAME=valentinn_nikonov
 ```
 
@@ -78,4 +79,27 @@ The Mini App needs a public HTTPS API URL too:
 
 ```env
 METAL_CONNECT_API_URL=https://your-api-domain.example
+METAL_CONNECT_API_CORS_ORIGIN=https://your-github-name.github.io
+```
+
+## Temporary Public API With ngrok
+
+Install ngrok, then run:
+
+```bash
+ngrok http 8091
+```
+
+Copy the HTTPS forwarding URL into `.env`:
+
+```env
+METAL_CONNECT_API_URL=https://abc123.ngrok-free.app
+METAL_CONNECT_API_CORS_ORIGIN=https://valentinnikonov04-ux.github.io
+```
+
+Start the API and bot in separate terminals:
+
+```bash
+python3 metal_connect_api.py
+python3 metal_connect_simple_working.py
 ```
