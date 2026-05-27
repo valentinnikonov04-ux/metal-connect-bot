@@ -30,6 +30,7 @@ var params = new URLSearchParams(window.location.search);
 var explicitUserId = params.get("user_id");
 var debugEnabled = params.get("debug") === "1" || safeGet("mc_debug", "") === "1";
 var API_BASE = "";
+var REQUEST_TIMEOUT_MS = 30000;
 
 var state = {
   role: normalizeRole(params.get("role") || safeGet("mc_role", "")),
@@ -167,7 +168,7 @@ async function apiGet(path) {
   if (!API_BASE) throw new Error("API не настроен");
   var url = API_BASE + withUserId(path);
   apiRequestLog("GET", url);
-  var response = await fetch(url, { headers: apiHeaders() });
+  var response = await fetchWithTimeout(url, { headers: apiHeaders() });
   apiResponseLog(response);
   if (!response.ok) throw new Error(await apiError(response));
   return response.json();
@@ -178,7 +179,7 @@ async function apiPost(path, body) {
   body = withUserBody(body);
   var url = API_BASE + path;
   apiRequestLog("POST", url, body);
-  var response = await fetch(url, {
+  var response = await fetchWithTimeout(url, {
     method: "POST",
     headers: apiHeaders(),
     body: JSON.stringify(body || {})
@@ -192,13 +193,25 @@ async function apiDelete(path) {
   if (!API_BASE) throw new Error("API не настроен");
   var url = API_BASE + withUserId(path);
   apiRequestLog("DELETE", url);
-  var response = await fetch(url, {
+  var response = await fetchWithTimeout(url, {
     method: "DELETE",
     headers: apiHeaders()
   });
   apiResponseLog(response);
   if (!response.ok) throw new Error(await apiError(response));
   return response.json();
+}
+
+async function fetchWithTimeout(url, options) {
+  var controller = new AbortController();
+  var timeout = setTimeout(function () { controller.abort(); }, REQUEST_TIMEOUT_MS);
+  options = options || {};
+  options.signal = controller.signal;
+  try {
+    return await fetch(url, options);
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 async function apiError(response) {
@@ -510,6 +523,7 @@ function orderPayload() {
 
 async function publishOrder() {
   var payload = orderPayload();
+  var button = $("#publishOrderBtn");
   debugLog("CLICK publishOrder");
   if (!payload.title || !payload.description || !payload.quantity || !payload.budget || !payload.city || !payload.deadline) {
     showToast("Заполните название, описание, количество, город, срок и бюджет.");
@@ -520,18 +534,23 @@ async function publishOrder() {
     return;
   }
   try {
+    setButtonLoading(button, true, "Публикую...");
     if ($("#orderFiles").files && $("#orderFiles").files[0]) {
-      payload.file_id = await readFileAsDataUrl($("#orderFiles").files[0]);
+      payload.file_id = await imageFileToDataUrl($("#orderFiles").files[0], 1280, 0.72);
       payload.file_type = "image_data";
       debugLog("ORDER file attached name=" + $("#orderFiles").files[0].name);
     }
     if (API_BASE) await apiPost("/api/orders/create", payload);
     else if (tg && tg.sendData) tg.sendData(JSON.stringify(payload));
     showToast("Заказ отправлен.");
-    await loadData();
+    clearOrderForm();
+    await refreshAfterOrderCreate();
+    setView("ordersView");
   } catch (error) {
     debugLog("ORDER ERROR " + error.message);
     showToast("Не удалось отправить заказ: " + error.message);
+  } finally {
+    setButtonLoading(button, false);
   }
 }
 
@@ -897,6 +916,7 @@ async function handleActionClick(event) {
 }
 
 async function addPortfolio() {
+  var button = $("#portfolioAddBtn");
   var fileId = $("#portfolioFileId").value.trim();
   var text = $("#portfolioText").value.trim();
   var fileInput = $("#portfolioPhoto");
@@ -906,37 +926,50 @@ async function addPortfolio() {
     return;
   }
   if (!fileId && fileInput && fileInput.files && fileInput.files[0]) {
-    fileId = await readFileAsDataUrl(fileInput.files[0]);
+    fileId = await imageFileToDataUrl(fileInput.files[0], 1280, 0.72);
   }
   if (!fileId) {
     showToast("Добавьте фото или укажите file_id.");
     return;
   }
   debugLog("SUBMIT portfolio file=" + (fileId ? "yes" : "no") + " text_length=" + text.length);
-  await actionPost("/api/portfolio/add", { file_id: fileId, description: text, text: text, equipment: equipment, file_type: fileId.indexOf("data:image/") === 0 ? "image_data" : "photo" });
-  $("#portfolioFileId").value = "";
-  $("#portfolioText").value = "";
-  if ($("#portfolioEquipment")) $("#portfolioEquipment").value = "";
-  if (fileInput) fileInput.value = "";
+  try {
+    setButtonLoading(button, true, "Добавляю...");
+    await actionPost("/api/portfolio/add", { file_id: fileId, description: text, text: text, equipment: equipment, file_type: fileId.indexOf("data:image/") === 0 ? "image_data" : "photo" });
+    $("#portfolioFileId").value = "";
+    $("#portfolioText").value = "";
+    if ($("#portfolioEquipment")) $("#portfolioEquipment").value = "";
+    if (fileInput) fileInput.value = "";
+  } finally {
+    setButtonLoading(button, false);
+  }
 }
 
 async function actionPost(path, body) {
+  var activeButton = document.activeElement && document.activeElement.tagName === "BUTTON" ? document.activeElement : null;
   try {
+    setButtonLoading(activeButton, true);
     await apiPost(path, body);
-    await loadData();
+    await refreshAfterMutation(path);
   } catch (error) {
     debugLog("ACTION ERROR " + error.message);
     showToast("Действие не выполнено: " + error.message);
+  } finally {
+    setButtonLoading(activeButton, false);
   }
 }
 
 async function actionDelete(path) {
+  var activeButton = document.activeElement && document.activeElement.tagName === "BUTTON" ? document.activeElement : null;
   try {
+    setButtonLoading(activeButton, true);
     await apiDelete(path);
-    await loadData();
+    await refreshAfterMutation(path);
   } catch (error) {
     debugLog("DELETE ERROR " + error.message);
     showToast("Действие не выполнено: " + error.message);
+  } finally {
+    setButtonLoading(activeButton, false);
   }
 }
 
@@ -997,12 +1030,13 @@ function calendarDateKey(date, day) {
 
 function drawingPreview(order) {
   var fileId = order.file_id || order.photo_id || order.file_preview || "";
-  if (!fileId) return '<div class="drawing-preview"><span>чертеж не прикреплен</span></div>';
-  return '<div class="drawing-preview">' + filePreview(fileId, order.file_type) + '</div>';
+  if (order.file_url) return '<div class="drawing-preview">' + filePreview(API_BASE + order.file_url + withUserId("").replace("?", "&"), order.file_type, true) + '</div>';
+  if (!fileId) return '<div class="drawing-preview"><span>' + h(order.has_file ? "чертеж прикреплен" : "чертеж не прикреплен") + '</span></div>';
+  return '<div class="drawing-preview">' + filePreview(fileId, order.file_type, false) + '</div>';
 }
 
-function filePreview(fileId, fileType) {
-  if (String(fileId).indexOf("data:image/") === 0) {
+function filePreview(fileId, fileType, forceImage) {
+  if (forceImage || String(fileId).indexOf("data:image/") === 0) {
     return '<img src="' + h(fileId) + '" alt="Прикрепленный файл">';
   }
   return '<span>' + h(fileId) + '</span>';
@@ -1021,12 +1055,99 @@ function readFileAsDataUrl(file) {
   });
 }
 
+async function imageFileToDataUrl(file, maxSide, quality) {
+  if (!file || !file.type || file.type.indexOf("image/") !== 0) return readFileAsDataUrl(file);
+  var source = await readFileAsDataUrl(file);
+  return new Promise(function (resolve) {
+    var image = new Image();
+    image.onload = function () {
+      var scale = Math.min(1, maxSide / Math.max(image.width, image.height));
+      var width = Math.max(1, Math.round(image.width * scale));
+      var height = Math.max(1, Math.round(image.height * scale));
+      var canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      var ctx = canvas.getContext("2d");
+      ctx.drawImage(image, 0, 0, width, height);
+      resolve(canvas.toDataURL("image/jpeg", quality || 0.72));
+    };
+    image.onerror = function () { resolve(source); };
+    image.src = source;
+  });
+}
+
+function setButtonLoading(button, loading, label) {
+  if (!button) return;
+  if (loading) {
+    if (!button.dataset.originalText) button.dataset.originalText = button.textContent;
+    button.disabled = true;
+    button.classList.add("is-loading");
+    button.textContent = label || "Загрузка...";
+    return;
+  }
+  button.disabled = false;
+  button.classList.remove("is-loading");
+  if (button.dataset.originalText) {
+    button.textContent = button.dataset.originalText;
+    delete button.dataset.originalText;
+  }
+}
+
+async function refreshAfterOrderCreate() {
+  await refreshCustomerOrders();
+  setTimeout(refreshCustomerOrders, 1000);
+}
+
+async function refreshCustomerOrders() {
+  if (state.role !== "customer") {
+    await loadData();
+    return;
+  }
+  var orders = await apiGet("/api/orders/customer");
+  state.data.orders = (orders.orders || []).map(function (item) {
+    item.status = normalizeStatus(item.status);
+    return item;
+  });
+  var dashboard = await apiGet("/api/dashboard/customer");
+  state.data.dashboard = dashboard || {};
+  state.data.week = dashboard.week || state.data.week;
+  renderDashboard();
+  renderOrders();
+}
+
+async function refreshAfterMutation(path) {
+  if (path.indexOf("/api/calendar") === 0) {
+    var calendarData = await apiGet("/api/calendar");
+    state.data.calendar = calendarData.calendar || {};
+    renderCalendar();
+    return;
+  }
+  if (path.indexOf("/api/portfolio") === 0) {
+    var portfolioData = await apiGet("/api/portfolio");
+    state.data.portfolio = portfolioData.portfolio || [];
+    renderPortfolio();
+    return;
+  }
+  if (path.indexOf("/api/profile") === 0) {
+    var me = await apiGet("/api/me");
+    state.data.profile = me.user || {};
+    renderProfile();
+    return;
+  }
+  if (path.indexOf("/api/orders") === 0 && state.role === "customer") {
+    await refreshCustomerOrders();
+    return;
+  }
+  await loadData();
+}
+
 async function uploadChatPhoto() {
   var input = $("#chatPhoto");
   var file = input.files && input.files[0];
   if (!file || !state.selectedOrderId) return;
   try {
-    var fileId = await readFileAsDataUrl(file);
+    setButtonLoading($("#attachBtn"), true, "Отправляю...");
+    var fileId = await imageFileToDataUrl(file, 1280, 0.72);
     await apiPost("/api/chat/upload", {
       order_id: state.selectedOrderId,
       text: file.name,
@@ -1039,6 +1160,8 @@ async function uploadChatPhoto() {
   } catch (error) {
     debugLog("CHAT UPLOAD ERROR " + error.message, "error");
     showToast("Не удалось отправить фото: " + error.message);
+  } finally {
+    setButtonLoading($("#attachBtn"), false);
   }
 }
 

@@ -1,3 +1,4 @@
+import base64
 import json
 import logging
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -25,6 +26,8 @@ OFFER_TO_API = {
 OFFER_FROM_API = {value: key for key, value in OFFER_TO_API.items()}
 NGROK_URL_PATH = Path(".ngrok_url")
 CURRENT_NGROK_URL = ""
+RESPONSE_CACHE = {}
+CACHE_TTL_SECONDS = 5
 
 
 def clean_public_url(value):
@@ -131,8 +134,30 @@ def log_request(handler, method, path, user_id=0, body=None):
         method,
         path,
         user_id or "",
-        json.dumps(body or {}, ensure_ascii=False),
+        json.dumps(compact_log_body(body or {}), ensure_ascii=False),
     )
+
+
+def compact_log_body(body):
+    compact = {}
+    for key, value in (body or {}).items():
+        if isinstance(value, str) and len(value) > 300:
+            compact[key] = f"<{len(value)} chars>"
+        else:
+            compact[key] = value
+    return compact
+
+
+def clear_cache():
+    RESPONSE_CACHE.clear()
+
+
+def data_url_parts(value):
+    if not isinstance(value, str) or not value.startswith("data:") or "," not in value:
+        return None, None
+    meta, payload = value.split(",", 1)
+    mime = meta[5:].split(";", 1)[0] or "application/octet-stream"
+    return mime, payload
 
 
 def ensure_user(user_id, role=None):
@@ -186,8 +211,17 @@ def order_public(order):
         return None
     data["status"] = api_status(data.get("status"))
     data["quantity"] = data.get("quantity") or 0
-    data["file_id"] = data.get("file_id") or data.get("photo_id") or data.get("file_preview") or ""
-    data["photo_id"] = data.get("photo_id") or data.get("file_id") or data.get("file_preview") or ""
+    raw_file_id = data.get("file_id") or data.get("photo_id") or data.get("file_preview") or ""
+    data["has_file"] = bool(raw_file_id)
+    if isinstance(raw_file_id, str) and raw_file_id.startswith("data:image/"):
+        data["file_url"] = f"/api/orders/file?order_id={data['id']}"
+        data["file_id"] = ""
+        data["photo_id"] = ""
+        data["file_preview"] = "чертеж прикреплен"
+    else:
+        data["file_url"] = ""
+        data["file_id"] = raw_file_id
+        data["photo_id"] = raw_file_id
     data["executor_id"] = data.get("executor_id") or data.get("selected_executor_id")
     return data
 
@@ -458,6 +492,7 @@ def executor_stats(user_id):
 
 class ApiHandler(BaseHTTPRequestHandler):
     server_version = "MetalConnectAPI/1.0"
+    protocol_version = "HTTP/1.1"
 
     def do_OPTIONS(self):
         parsed = urlparse(self.path)
@@ -473,14 +508,43 @@ class ApiHandler(BaseHTTPRequestHandler):
             log_request(self, "GET", path, user_id)
 
             if path == "/api/me":
+                cache_key = ("me", user_id)
+                if cache_key in RESPONSE_CACHE:
+                    self.send_json(RESPONSE_CACHE[cache_key])
+                    return
                 user = db_one("SELECT * FROM users WHERE id=?", (user_id,))
-                self.send_json({"user": user_public(user), "role": user["role"] if user else None})
+                data = {"user": user_public(user), "role": user["role"] if user else None}
+                RESPONSE_CACHE[cache_key] = data
+                self.send_json(data)
                 return
             if path == "/api/dashboard/customer":
-                self.send_json(customer_dashboard(user_id))
+                cache_key = ("dashboard_customer", user_id)
+                data = RESPONSE_CACHE.get(cache_key)
+                if data is None:
+                    data = customer_dashboard(user_id)
+                    RESPONSE_CACHE[cache_key] = data
+                self.send_json(data)
                 return
             if path == "/api/dashboard/executor":
-                self.send_json(executor_dashboard(user_id))
+                cache_key = ("dashboard_executor", user_id)
+                data = RESPONSE_CACHE.get(cache_key)
+                if data is None:
+                    data = executor_dashboard(user_id)
+                    RESPONSE_CACHE[cache_key] = data
+                self.send_json(data)
+                return
+            if path == "/api/orders/file":
+                order_id = int_param(query, "order_id")
+                order = db_one("SELECT file_id, photo_id, file_preview, file_type FROM orders WHERE id=?", (order_id,))
+                if not order:
+                    self.send_error_json(404, "File not found")
+                    return
+                value = order["file_id"] or order["photo_id"] or order["file_preview"] or ""
+                mime, payload = data_url_parts(value)
+                if mime and payload:
+                    self.send_bytes(base64.b64decode(payload), mime)
+                    return
+                self.send_json({"file_id": value, "file_type": order["file_type"] or ""})
                 return
             if path == "/api/orders/customer":
                 self.send_json({"orders": customer_orders(user_id)})
@@ -539,6 +603,7 @@ class ApiHandler(BaseHTTPRequestHandler):
             path = parsed.path
             user_id = request_user_id(self, body=body)
             log_request(self, "POST", path, user_id, body)
+            clear_cache()
 
             if path == "/api/orders/create":
                 ensure_user(user_id, "customer")
@@ -829,6 +894,7 @@ class ApiHandler(BaseHTTPRequestHandler):
             query = parse_qs(parsed.query)
             user_id = request_user_id(self, query=query)
             log_request(self, "DELETE", parsed.path, user_id)
+            clear_cache()
             if parsed.path in {"/api/favorites/remove", "/api/favorites"}:
                 executor_id = int_param(query, "executor_id")
                 if not executor_id:
@@ -868,9 +934,29 @@ class ApiHandler(BaseHTTPRequestHandler):
         self.send_header("Access-Control-Allow-Origin", allow_origin)
         self.send_header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type, X-Telegram-Init-Data, ngrok-skip-browser-warning")
+        self.send_header("Connection", "keep-alive")
         self.send_header("Vary", "Origin")
         self.end_headers()
-        self.wfile.write(raw)
+        try:
+            self.wfile.write(raw)
+        except BrokenPipeError:
+            logging.info("Client disconnected, ignoring broken pipe")
+
+    def send_bytes(self, raw, content_type="application/octet-stream", status=200):
+        allow_origin = "*"
+        self.send_response(status)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(raw)))
+        self.send_header("Cache-Control", "public, max-age=3600")
+        self.send_header("Access-Control-Allow-Origin", allow_origin)
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, X-Telegram-Init-Data, ngrok-skip-browser-warning")
+        self.send_header("Connection", "keep-alive")
+        self.end_headers()
+        try:
+            self.wfile.write(raw)
+        except BrokenPipeError:
+            logging.info("Client disconnected during binary response, ignoring broken pipe")
 
     def send_error_json(self, status, message):
         self.send_json({"ok": False, "error": message}, status)
