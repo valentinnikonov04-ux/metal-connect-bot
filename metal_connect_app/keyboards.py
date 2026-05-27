@@ -9,16 +9,21 @@ from aiogram.types import (
     WebAppInfo,
 )
 
-from metal_connect_app.config import WEBAPP_URL
+from metal_connect_app.config import API_URL, WEBAPP_URL
 
 
 def webapp_url(role: Optional[str] = None) -> str:
     if not WEBAPP_URL:
         return ""
-    if role not in {"customer", "executor"}:
+    query = {}
+    if role in {"customer", "executor"}:
+        query["role"] = role
+    if API_URL:
+        query["api"] = API_URL
+    if not query:
         return WEBAPP_URL
     separator = "&" if "?" in WEBAPP_URL else "?"
-    return f"{WEBAPP_URL}{separator}{urlencode({'role': role})}"
+    return f"{WEBAPP_URL}{separator}{urlencode(query)}"
 
 
 def mini_app_button(role: Optional[str] = None) -> KeyboardButton:

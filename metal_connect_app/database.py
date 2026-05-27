@@ -158,4 +158,28 @@ def init_db():
         }
         if "work_status" not in existing_columns:
             cur.execute("ALTER TABLE users ADD COLUMN work_status TEXT DEFAULT 'Принимаю заказы'")
+
+        order_columns = {
+            row["name"] for row in cur.execute("PRAGMA table_info(orders)").fetchall()
+        }
+        if "material" not in order_columns:
+            cur.execute("ALTER TABLE orders ADD COLUMN material TEXT")
+        if "quantity" not in order_columns:
+            cur.execute("ALTER TABLE orders ADD COLUMN quantity INTEGER DEFAULT 0")
+        if "urgency" not in order_columns:
+            cur.execute("ALTER TABLE orders ADD COLUMN urgency TEXT")
+        if "file_preview" not in order_columns:
+            cur.execute("ALTER TABLE orders ADD COLUMN file_preview TEXT")
+
+        cur.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS executor_calendar(
+                user_id INTEGER NOT NULL,
+                day TEXT NOT NULL,
+                status TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE(user_id, day)
+            );
+            """
+        )
         con.commit()

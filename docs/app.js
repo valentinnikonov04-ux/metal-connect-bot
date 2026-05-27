@@ -15,6 +15,8 @@ var $ = function (selector) { return document.querySelector(selector); };
 var $$ = function (selector) { return Array.prototype.slice.call(document.querySelectorAll(selector)); };
 var params = new URLSearchParams(window.location.search);
 var API_BASE = (params.get("api") || safeGet("mc_api_url", "")).replace(/\/$/, "");
+if (API_BASE.slice(-4) === "/api") API_BASE = API_BASE.slice(0, -4);
+var explicitUserId = params.get("user_id");
 
 var state = {
   role: normalizeRole(params.get("role") || safeGet("mc_role", "")),
@@ -82,7 +84,7 @@ function normalizeRole(role) {
 }
 
 function telegramUser() {
-  var fallback = { id: null, first_name: "Пользователь", username: "" };
+  var fallback = { id: explicitUserId, first_name: "Пользователь", username: "" };
   if (tg && tg.initDataUnsafe && tg.initDataUnsafe.user) return tg.initDataUnsafe.user;
   return fallback;
 }
@@ -99,13 +101,14 @@ function apiHeaders() {
 
 async function apiGet(path) {
   if (!API_BASE) throw new Error("API не настроен");
-  var response = await fetch(API_BASE + path, { headers: apiHeaders() });
+  var response = await fetch(API_BASE + withUserId(path), { headers: apiHeaders() });
   if (!response.ok) throw new Error("API " + response.status);
   return response.json();
 }
 
 async function apiPost(path, body) {
   if (!API_BASE) throw new Error("API не настроен");
+  body = withUserBody(body);
   var response = await fetch(API_BASE + path, {
     method: "POST",
     headers: apiHeaders(),
@@ -113,6 +116,28 @@ async function apiPost(path, body) {
   });
   if (!response.ok) throw new Error("API " + response.status);
   return response.json();
+}
+
+async function apiDelete(path) {
+  if (!API_BASE) throw new Error("API не настроен");
+  var response = await fetch(API_BASE + withUserId(path), {
+    method: "DELETE",
+    headers: apiHeaders()
+  });
+  if (!response.ok) throw new Error("API " + response.status);
+  return response.json();
+}
+
+function withUserId(path) {
+  var userId = state.user.id || explicitUserId || "";
+  if (!userId) return path;
+  return path + (path.indexOf("?") === -1 ? "?" : "&") + "user_id=" + encodeURIComponent(userId);
+}
+
+function withUserBody(body) {
+  var payload = body || {};
+  if (!payload.user_id) payload.user_id = state.user.id || explicitUserId || "";
+  return payload;
 }
 
 async function loadData() {
@@ -123,7 +148,9 @@ async function loadData() {
   safeSet("mc_role", state.role);
   renderSkeleton();
   try {
-    var data = await apiGet("/miniapp/bootstrap?role=" + encodeURIComponent(state.role));
+    var me = await apiGet("/api/me");
+    state.role = normalizeRole((me && me.role) || state.role);
+    var data = await loadRoleData(state.role, me);
     state.apiReady = true;
     state.role = normalizeRole(data.role) || state.role;
     state.data = normalizeData(data);
@@ -132,6 +159,45 @@ async function loadData() {
     state.data = emptyData();
   }
   renderAll();
+}
+
+async function loadRoleData(role, me) {
+  if (role === "executor") {
+    var executorDashboard = await apiGet("/api/dashboard/executor");
+    var openOrders = await apiGet("/api/orders/open");
+    var executorOffers = await apiGet("/api/offers/executor");
+    var executorPortfolio = await apiGet("/api/portfolio");
+    var executorCalendar = await apiGet("/api/calendar");
+    var executorMessages = await apiGet("/api/messages");
+    return {
+      role: "executor",
+      dashboard: executorDashboard,
+      orders: openOrders.orders || [],
+      offers: executorOffers.offers || [],
+      portfolio: executorPortfolio.portfolio || [],
+      calendar: executorCalendar.calendar || {},
+      messages: executorMessages.messages || [],
+      stats: executorDashboard.stats || {},
+      profile: me.user || {}
+    };
+  }
+  var customerDashboard = await apiGet("/api/dashboard/customer");
+  var customerOrders = await apiGet("/api/orders/customer");
+  var customerOffers = await apiGet("/api/offers/customer");
+  var favorites = await apiGet("/api/favorites");
+  var executors = await apiGet("/api/executors");
+  var customerMessages = await apiGet("/api/messages");
+  return {
+    role: "customer",
+    dashboard: customerDashboard,
+    week: customerDashboard.week || [0, 0, 0, 0, 0, 0, 0],
+    orders: customerOrders.orders || [],
+    offers: customerOffers.offers || [],
+    favorites: favorites.favorites || [],
+    executors: executors.executors || [],
+    messages: customerMessages.messages || [],
+    profile: me.user || {}
+  };
 }
 
 function normalizeData(data) {
@@ -360,7 +426,7 @@ async function publishOrder() {
     return;
   }
   try {
-    if (API_BASE) await apiPost("/miniapp/orders", payload);
+    if (API_BASE) await apiPost("/api/orders/create", payload);
     else if (tg && tg.sendData) tg.sendData(JSON.stringify(payload));
     showToast("Заказ отправлен.");
     await loadData();
@@ -522,7 +588,7 @@ function renderCalendar() {
 function renderPortfolio() {
   var rows = state.data.portfolio || [];
   $("#portfolioGrid").innerHTML = rows.map(function (item) {
-    return '<article class="portfolio-card steel"><div></div><h3>' + h(item.title || "Работа") + '</h3><p>' + h(item.description || item.equipment || "") + '</p><button class="ghost" data-action="edit-portfolio" data-item="' + h(item.id) + '" type="button">Редактировать</button></article>';
+    return '<article class="portfolio-card steel"><div></div><h3>' + h(item.title || "Работа") + '</h3><p>' + h(item.description || item.equipment || "") + '</p><button class="ghost" data-action="remove-portfolio" data-item="' + h(item.id) + '" type="button">Удалить</button></article>';
   }).join("") || emptyPanel("Портфолио пустое", "Добавьте фото работ, описание оборудования и станков.");
   $("#reviewsList").innerHTML = (state.data.reviews || []).map(function (review) {
     return '<article class="order-card"><div class="card-head"><h3>' + h(review.author || "Заказчик") + '</h3><span class="status done">' + h(review.stars || 0) + ' ★</span></div><p>' + h(review.text || "") + '</p></article>';
@@ -581,7 +647,7 @@ async function submitOffer(event) {
     return;
   }
   try {
-    await apiPost("/miniapp/offers", {
+    await apiPost("/api/offers/create", {
       order_id: state.selectedOrderId,
       price: $("#offerPrice").value,
       deadline_days: $("#offerDays").value,
@@ -630,6 +696,7 @@ function initEvents() {
     $("#offerDays").value = "";
     $("#offerComment").value = "Готов рассчитать после уточнения чертежа и материала.";
   });
+  $("#portfolioAddBtn").addEventListener("click", addPortfolio);
   $("#sharePortfolioBtn").addEventListener("click", function () { showToast("Ссылка на портфолио появится после подключения API."); });
   $("#chatForm").addEventListener("submit", sendChatMessage);
   $("#supportBtn").addEventListener("click", function () {
@@ -645,7 +712,7 @@ async function sendChatMessage(event) {
   var text = $("#chatInput").value.trim();
   if (!text || !state.selectedOrderId) return;
   try {
-    await apiPost("/miniapp/messages", { order_id: state.selectedOrderId, text: text });
+    await apiPost("/api/messages/create", { order_id: state.selectedOrderId, text: text });
     $("#chatInput").value = "";
     await loadData();
     setView("chatView");
@@ -667,14 +734,26 @@ async function handleActionClick(event) {
     state.selectedOrderId = button.dataset.order;
     setView(action === "view-offers" ? "offersView" : "chatView");
   }
-  if (action === "complete-order") await actionPost("/miniapp/orders/" + button.dataset.order + "/complete", {});
-  if (action === "accept-offer") await actionPost("/miniapp/offers/" + button.dataset.offer + "/accept", {});
-  if (action === "decline-offer") await actionPost("/miniapp/offers/" + button.dataset.offer + "/decline", {});
-  if (action === "favorite") await actionPost("/miniapp/favorites", { executor_id: button.dataset.executor });
-  if (action === "remove-favorite") await actionPost("/miniapp/favorites/" + button.dataset.executor + "/delete", {});
-  if (action === "calendar-day") await actionPost("/miniapp/calendar", { day: button.dataset.day });
+  if (action === "complete-order") await actionPost("/api/orders/complete", { order_id: button.dataset.order });
+  if (action === "accept-offer") await actionPost("/api/offers/accept", offerAcceptPayload(button.dataset.offer));
+  if (action === "decline-offer") await actionPost("/api/offers/decline", { offer_id: button.dataset.offer });
+  if (action === "favorite") await actionPost("/api/favorites/add", { executor_id: button.dataset.executor });
+  if (action === "remove-favorite") await actionDelete("/api/favorites/remove?executor_id=" + encodeURIComponent(button.dataset.executor));
+  if (action === "calendar-day") await setCalendarDay(button.dataset.day);
   if (action === "save-profile") await saveProfile();
-  if (action === "edit-portfolio") showToast("Редактирование портфолио подключается к API файлов.");
+  if (action === "remove-portfolio") await actionDelete("/api/portfolio/remove?portfolio_id=" + encodeURIComponent(button.dataset.item));
+}
+
+async function addPortfolio() {
+  var fileId = $("#portfolioFileId").value.trim();
+  var text = $("#portfolioText").value.trim();
+  if (!fileId || !text) {
+    showToast("Укажите file_id и описание.");
+    return;
+  }
+  await actionPost("/api/portfolio/add", { file_id: fileId, text: text });
+  $("#portfolioFileId").value = "";
+  $("#portfolioText").value = "";
 }
 
 async function actionPost(path, body) {
@@ -686,12 +765,36 @@ async function actionPost(path, body) {
   }
 }
 
+async function actionDelete(path) {
+  try {
+    await apiDelete(path);
+    await loadData();
+  } catch (error) {
+    showToast("Действие не выполнено. Проверьте API.");
+  }
+}
+
+function offerAcceptPayload(offerId) {
+  var offer = (state.data.offers || []).find(function (item) { return String(item.id) === String(offerId); }) || {};
+  return {
+    offer_id: offerId,
+    order_id: offer.order_id,
+    executor_id: offer.executor_id
+  };
+}
+
+async function setCalendarDay(day) {
+  var current = (state.data.calendar || {})[day] || "free";
+  var next = { free: "partial", partial: "busy", busy: "reserve", reserve: "free" }[current] || "free";
+  await actionPost("/api/calendar/set", { day: day, status: next });
+}
+
 async function saveProfile() {
   var payload = {};
   $$("[data-profile]").forEach(function (input) {
     payload[input.dataset.profile] = input.value.trim();
   });
-  await actionPost("/miniapp/profile", payload);
+  await actionPost("/api/profile/update", payload);
 }
 
 function findOrder(id) {

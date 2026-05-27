@@ -15,10 +15,17 @@ cp .env.example .env
 ```env
 METAL_CONNECT_BOT_TOKEN=your_telegram_bot_token
 METAL_CONNECT_WEBAPP_URL=https://your-public-mini-app-url.example
+METAL_CONNECT_API_URL=https://your-api-domain.example
 METAL_CONNECT_SUPPORT_ADMIN_USERNAME=valentinn_nikonov
 ```
 
-3. Run bot:
+3. Run API:
+
+```bash
+python3 metal_connect_api.py
+```
+
+4. Run bot:
 
 ```bash
 python3 metal_connect_simple_working.py
@@ -65,4 +72,10 @@ GitHub will provide a permanent HTTPS URL. Put that URL into `.env` as:
 
 ```env
 METAL_CONNECT_WEBAPP_URL=https://your-github-name.github.io/your-repo-name/
+```
+
+The Mini App needs a public HTTPS API URL too:
+
+```env
+METAL_CONNECT_API_URL=https://your-api-domain.example
 ```

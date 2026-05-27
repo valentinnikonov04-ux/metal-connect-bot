@@ -234,7 +234,15 @@
           <h2>Портфолио</h2>
           <button class="ghost" id="sharePortfolioBtn" type="button">Поделиться</button>
         </div>
-        <p class="panel-copy">Фото работ, отзывы и короткая витрина производственных возможностей.</p>
+        <div class="form-grid">
+          <label>File ID фото
+            <input id="portfolioFileId" type="text" placeholder="Telegram file_id">
+          </label>
+          <label>Описание работы / оборудование
+            <input id="portfolioText" type="text" placeholder="Фрезеровка корпуса, станок Haas VF-2">
+          </label>
+          <button class="primary wide" id="portfolioAddBtn" type="button">➕ Добавить в портфолио</button>
+        </div>
       </section>
       <section class="portfolio-grid" id="portfolioGrid"></section>
       <section class="cards-list" id="reviewsList"></section>
