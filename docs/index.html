@@ -215,6 +215,7 @@
         <div class="messages" id="messages"></div>
         <div class="quick" id="quickReplies"></div>
         <form class="chat-form" id="chatForm">
+          <input id="chatPhoto" class="file-input-hidden" type="file" accept="image/*">
           <input id="chatInput" type="text" placeholder="Написать сообщение">
           <button class="primary" type="submit">Отправить</button>
         </form>
@@ -249,6 +250,9 @@
           </label>
           <label>Описание работы / оборудование
             <input id="portfolioText" type="text" placeholder="Фрезеровка корпуса, станок Haas VF-2">
+          </label>
+          <label>Оборудование / станки
+            <input id="portfolioEquipment" type="text" placeholder="Haas VF-2, Fanuc, лазер 3 кВт">
           </label>
           <button class="primary wide" id="portfolioAddBtn" type="button">➕ Добавить в портфолио</button>
         </div>

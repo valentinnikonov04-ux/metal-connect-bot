@@ -135,11 +135,29 @@ def log_request(handler, method, path, user_id=0, body=None):
     )
 
 
+def ensure_user(user_id, role=None):
+    if not user_id:
+        return
+    existing = db_one("SELECT id FROM users WHERE id=?", (user_id,))
+    if existing:
+        if role in {"customer", "executor"}:
+            db_execute("UPDATE users SET role=COALESCE(role, ?), updated_at=? WHERE id=?", (role, now_iso(), user_id))
+        return
+    db_execute(
+        """
+        INSERT INTO users(id, username, full_name, role, created_at, updated_at)
+        VALUES(?,?,?,?,?,?)
+        """,
+        (user_id, "", "", role or "customer", now_iso(), now_iso()),
+    )
+
+
 def user_public(user):
     if not user:
         return None
     rating, reviews_count = user_rating(user["id"])
-    return {
+    customer = db_one("SELECT * FROM customers WHERE user_id=?", (user["id"],))
+    data = {
         "id": user["id"],
         "username": user["username"],
         "full_name": user["full_name"],
@@ -154,6 +172,12 @@ def user_public(user):
         "rating": rating,
         "reviews_count": reviews_count,
     }
+    if customer:
+        data["company"] = customer["company"] or data["company"]
+        data["city"] = customer["city"] or data["city"]
+        data["phone"] = customer["phone"] or data["phone"]
+        data["customer_type"] = customer["customer_type"]
+    return data
 
 
 def order_public(order):
@@ -162,6 +186,9 @@ def order_public(order):
         return None
     data["status"] = api_status(data.get("status"))
     data["quantity"] = data.get("quantity") or 0
+    data["file_id"] = data.get("file_id") or data.get("photo_id") or data.get("file_preview") or ""
+    data["photo_id"] = data.get("photo_id") or data.get("file_id") or data.get("file_preview") or ""
+    data["executor_id"] = data.get("executor_id") or data.get("selected_executor_id")
     return data
 
 
@@ -321,7 +348,11 @@ def portfolio(user_id):
     return rows_dict(
         db_all(
             """
-            SELECT id, file_id, file_type, caption AS description, caption AS title, created_at
+            SELECT id, file_id, file_type,
+                   COALESCE(description, caption, '') AS description,
+                   COALESCE(description, caption, '') AS title,
+                   COALESCE(equipment, '') AS equipment,
+                   created_at
             FROM portfolio_files
             WHERE executor_id=?
             ORDER BY id DESC
@@ -510,12 +541,16 @@ class ApiHandler(BaseHTTPRequestHandler):
             log_request(self, "POST", path, user_id, body)
 
             if path == "/api/orders/create":
+                ensure_user(user_id, "customer")
+                file_id = body.get("file_id") or body.get("photo_id") or ""
+                file_type = body.get("file_type") or ("image_data" if str(file_id).startswith("data:image/") else "")
                 order_id = db_execute(
                     """
                     INSERT INTO orders(customer_id, title, description, budget, city, deadline,
                                        payment_terms, status, created_at, updated_at,
-                                       material, quantity, urgency, file_preview)
-                    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                                       material, quantity, urgency, file_preview,
+                                       photo_id, file_id, file_type)
+                    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                     """,
                     (
                         user_id,
@@ -531,10 +566,65 @@ class ApiHandler(BaseHTTPRequestHandler):
                         body.get("material") or "",
                         int(body.get("quantity") or 0),
                         body.get("urgency") or "",
-                        body.get("photo_id") or body.get("file_id") or "",
+                        file_id,
+                        file_id,
+                        file_id,
+                        file_type,
                     ),
                 )
+                if file_id:
+                    db_execute(
+                        """
+                        INSERT INTO order_files(order_id, file_id, file_type, caption, created_at)
+                        VALUES(?,?,?,?,?)
+                        """,
+                        (order_id, file_id, file_type or "file", body.get("title") or "", now_iso()),
+                    )
                 self.send_json({"ok": True, "order_id": order_id})
+                return
+
+            if path == "/api/orders/update":
+                order_id = int(body["order_id"])
+                order = db_one("SELECT * FROM orders WHERE id=? AND customer_id=?", (order_id, user_id))
+                if not order:
+                    self.send_error_json(404, "Order not found")
+                    return
+                fields = {
+                    "title": body.get("title"),
+                    "description": body.get("description") or body.get("desc"),
+                    "budget": body.get("budget"),
+                    "city": body.get("city"),
+                    "deadline": body.get("deadline"),
+                    "payment_terms": body.get("payment_terms"),
+                    "material": body.get("material"),
+                    "quantity": body.get("quantity"),
+                    "urgency": body.get("urgency"),
+                    "file_id": body.get("file_id") or body.get("photo_id"),
+                    "photo_id": body.get("photo_id") or body.get("file_id"),
+                    "file_preview": body.get("file_id") or body.get("photo_id"),
+                    "file_type": body.get("file_type"),
+                }
+                sets = []
+                params = []
+                for name, value in fields.items():
+                    if value is not None:
+                        sets.append(f"{name}=?")
+                        params.append(value)
+                if sets:
+                    sets.append("updated_at=?")
+                    params.append(now_iso())
+                    params.append(order_id)
+                    db_execute(f"UPDATE orders SET {', '.join(sets)} WHERE id=?", tuple(params))
+                self.send_json({"ok": True})
+                return
+
+            if path == "/api/orders/cancel":
+                order_id = int(body["order_id"])
+                db_execute(
+                    "UPDATE orders SET status='cancelled', updated_at=? WHERE id=? AND customer_id=?",
+                    (now_iso(), order_id, user_id),
+                )
+                self.send_json({"ok": True})
                 return
 
             if path == "/api/set_ngrok_url":
@@ -579,13 +669,21 @@ class ApiHandler(BaseHTTPRequestHandler):
 
             if path == "/api/offers/accept":
                 offer_id = int(body["offer_id"])
-                order_id = int(body["order_id"])
-                executor_id = int(body["executor_id"])
+                offer = db_one("SELECT * FROM offers WHERE id=?", (offer_id,))
+                if not offer:
+                    self.send_error_json(404, "Offer not found")
+                    return
+                order_id = int(body.get("order_id") or offer["order_id"])
+                executor_id = int(body.get("executor_id") or offer["executor_id"])
                 db_execute("UPDATE offers SET status='accepted' WHERE id=?", (offer_id,))
                 db_execute("UPDATE offers SET status='declined' WHERE order_id=? AND id!=?", (order_id, offer_id))
                 db_execute(
-                    "UPDATE orders SET selected_executor_id=?, status='work', updated_at=? WHERE id=?",
-                    (executor_id, now_iso(), order_id),
+                    """
+                    UPDATE orders
+                    SET selected_executor_id=?, executor_id=?, status='work', updated_at=?
+                    WHERE id=?
+                    """,
+                    (executor_id, executor_id, now_iso(), order_id),
                 )
                 self.send_json({"ok": True})
                 return
@@ -617,12 +715,14 @@ class ApiHandler(BaseHTTPRequestHandler):
                 path = "/api/portfolio"
             if path == "/api/portfolio":
                 file_id = body.get("file_id") or body.get("photo_id") or ""
+                description = body.get("description") or body.get("text") or body.get("caption") or ""
+                equipment = body.get("equipment") or ""
                 portfolio_id = db_execute(
                     """
-                    INSERT INTO portfolio_files(executor_id, file_id, file_type, caption, created_at)
-                    VALUES(?,?,?,?,?)
+                    INSERT INTO portfolio_files(executor_id, file_id, file_type, caption, description, equipment, created_at)
+                    VALUES(?,?,?,?,?,?,?)
                     """,
-                    (user_id, file_id, body.get("file_type") or "photo", body.get("text") or body.get("caption") or "", now_iso()),
+                    (user_id, file_id, body.get("file_type") or "photo", description, description, equipment, now_iso()),
                 )
                 self.send_json({"ok": True, "portfolio_id": portfolio_id})
                 return
@@ -642,6 +742,8 @@ class ApiHandler(BaseHTTPRequestHandler):
                 return
 
             if path == "/api/profile/update":
+                role = body.get("role") if body.get("role") in {"customer", "executor"} else None
+                ensure_user(user_id, role)
                 db_execute(
                     """
                     UPDATE users
@@ -660,10 +762,34 @@ class ApiHandler(BaseHTTPRequestHandler):
                         user_id,
                     ),
                 )
+                if body.get("customer_type") is not None or role == "customer":
+                    db_execute(
+                        """
+                        INSERT INTO customers(user_id, company, city, phone, customer_type, created_at, updated_at)
+                        VALUES(?,?,?,?,?,?,?)
+                        ON CONFLICT(user_id) DO UPDATE SET
+                            company=COALESCE(excluded.company, customers.company),
+                            city=COALESCE(excluded.city, customers.city),
+                            phone=COALESCE(excluded.phone, customers.phone),
+                            customer_type=COALESCE(excluded.customer_type, customers.customer_type),
+                            updated_at=excluded.updated_at
+                        """,
+                        (
+                            user_id,
+                            body.get("company"),
+                            body.get("city"),
+                            body.get("phone"),
+                            body.get("customer_type"),
+                            now_iso(),
+                            now_iso(),
+                        ),
+                    )
                 self.send_json({"ok": True})
                 return
 
             if path == "/api/messages/create":
+                path = "/api/chat/messages"
+            if path == "/api/chat/upload":
                 path = "/api/chat/messages"
             if path == "/api/chat/messages":
                 order = db_one("SELECT * FROM orders WHERE id=?", (int(body["order_id"]),))
@@ -676,10 +802,18 @@ class ApiHandler(BaseHTTPRequestHandler):
                     receiver_id = order["customer_id"]
                 message_id = db_execute(
                     """
-                    INSERT INTO chat_messages(order_id, sender_id, receiver_id, text, created_at)
-                    VALUES(?,?,?,?,?)
+                    INSERT INTO chat_messages(order_id, sender_id, receiver_id, text, file_id, file_type, created_at)
+                    VALUES(?,?,?,?,?,?,?)
                     """,
-                    (int(body["order_id"]), sender_id, int(receiver_id), body.get("text") or "", now_iso()),
+                    (
+                        int(body["order_id"]),
+                        sender_id,
+                        int(receiver_id),
+                        body.get("text") or "",
+                        body.get("file_id") or body.get("photo_id") or "",
+                        body.get("file_type") or "",
+                        now_iso(),
+                    ),
                 )
                 self.send_json({"ok": True, "message_id": message_id})
                 return

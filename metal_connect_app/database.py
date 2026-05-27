@@ -70,6 +70,16 @@ def init_db():
                 updated_at TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS customers(
+                user_id INTEGER PRIMARY KEY,
+                company TEXT,
+                city TEXT,
+                phone TEXT,
+                customer_type TEXT,
+                created_at TEXT,
+                updated_at TEXT
+            );
+
             CREATE TABLE IF NOT EXISTS order_files(
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 order_id INTEGER NOT NULL,
@@ -170,6 +180,30 @@ def init_db():
             cur.execute("ALTER TABLE orders ADD COLUMN urgency TEXT")
         if "file_preview" not in order_columns:
             cur.execute("ALTER TABLE orders ADD COLUMN file_preview TEXT")
+        if "photo_id" not in order_columns:
+            cur.execute("ALTER TABLE orders ADD COLUMN photo_id TEXT")
+        if "file_id" not in order_columns:
+            cur.execute("ALTER TABLE orders ADD COLUMN file_id TEXT")
+        if "file_type" not in order_columns:
+            cur.execute("ALTER TABLE orders ADD COLUMN file_type TEXT")
+        if "executor_id" not in order_columns:
+            cur.execute("ALTER TABLE orders ADD COLUMN executor_id INTEGER")
+
+        chat_columns = {
+            row["name"] for row in cur.execute("PRAGMA table_info(chat_messages)").fetchall()
+        }
+        if "file_id" not in chat_columns:
+            cur.execute("ALTER TABLE chat_messages ADD COLUMN file_id TEXT")
+        if "file_type" not in chat_columns:
+            cur.execute("ALTER TABLE chat_messages ADD COLUMN file_type TEXT")
+
+        portfolio_columns = {
+            row["name"] for row in cur.execute("PRAGMA table_info(portfolio_files)").fetchall()
+        }
+        if "equipment" not in portfolio_columns:
+            cur.execute("ALTER TABLE portfolio_files ADD COLUMN equipment TEXT")
+        if "description" not in portfolio_columns:
+            cur.execute("ALTER TABLE portfolio_files ADD COLUMN description TEXT")
 
         cur.executescript(
             """
