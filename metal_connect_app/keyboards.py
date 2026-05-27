@@ -1,4 +1,5 @@
 from typing import Optional
+from urllib.parse import urlencode
 
 from aiogram.types import (
     InlineKeyboardButton,
@@ -11,28 +12,37 @@ from aiogram.types import (
 from metal_connect_app.config import WEBAPP_URL
 
 
-def mini_app_button() -> KeyboardButton:
+def webapp_url(role: Optional[str] = None) -> str:
+    if not WEBAPP_URL:
+        return ""
+    if role not in {"customer", "executor"}:
+        return WEBAPP_URL
+    separator = "&" if "?" in WEBAPP_URL else "?"
+    return f"{WEBAPP_URL}{separator}{urlencode({'role': role})}"
+
+
+def mini_app_button(role: Optional[str] = None) -> KeyboardButton:
     if WEBAPP_URL:
-        return KeyboardButton(text="Открыть кабинет", web_app=WebAppInfo(url=WEBAPP_URL))
+        return KeyboardButton(text="Открыть кабинет", web_app=WebAppInfo(url=webapp_url(role)))
     return KeyboardButton(text="Открыть кабинет")
 
 
 def main_keyboard(role: Optional[str] = None) -> ReplyKeyboardMarkup:
     if role == "customer":
         keyboard = [
-            [mini_app_button()],
+            [mini_app_button(role)],
             [KeyboardButton(text="Мой профиль"), KeyboardButton(text="Мои заказы")],
             [KeyboardButton(text="Создать заказ"), KeyboardButton(text="Написать в поддержку")],
         ]
     elif role == "executor":
         keyboard = [
-            [mini_app_button()],
+            [mini_app_button(role)],
             [KeyboardButton(text="Новые/актуальные заказы"), KeyboardButton(text="Мой профиль")],
             [KeyboardButton(text="Мои отклики/мои предложения"), KeyboardButton(text="Написать в поддержку")],
         ]
     else:
         keyboard = [
-            [mini_app_button()],
+            [mini_app_button(role)],
             [KeyboardButton(text="Меню"), KeyboardButton(text="Профиль")],
             [KeyboardButton(text="Написать в поддержку")],
         ]
@@ -47,7 +57,7 @@ def main_keyboard(role: Optional[str] = None) -> ReplyKeyboardMarkup:
 def inline_menu(role: Optional[str] = None, is_admin: bool = False) -> InlineKeyboardMarkup:
     rows = []
     if WEBAPP_URL:
-        rows.append([InlineKeyboardButton(text="Открыть кабинет", web_app=WebAppInfo(url=WEBAPP_URL))])
+        rows.append([InlineKeyboardButton(text="Открыть кабинет", web_app=WebAppInfo(url=webapp_url(role)))])
     if role == "customer":
         rows.extend(
             [

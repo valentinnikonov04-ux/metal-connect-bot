@@ -13,56 +13,18 @@ if (tg) {
 
 var $ = function (selector) { return document.querySelector(selector); };
 var $$ = function (selector) { return Array.prototype.slice.call(document.querySelectorAll(selector)); };
+var params = new URLSearchParams(window.location.search);
+var API_BASE = (params.get("api") || safeGet("mc_api_url", "")).replace(/\/$/, "");
 
 var state = {
-  role: safeGet("mc_role", "customer"),
+  role: normalizeRole(params.get("role") || safeGet("mc_role", "")),
+  user: telegramUser(),
   view: "dashboardView",
-  orderTab: "active",
+  orderTab: "open",
   material: "Сталь",
-  selectedOrder: null,
-  favoriteNotes: {
-    "ТехноМеталл": "Брал у них фрезеровку, отвечают быстро",
-    "Кама CNC": "Хорошая чистовая обработка, можно срочно",
-    "Северный Цех": "Сильны в сварных рамах"
-  },
-  executors: [
-    { name: "ТехноМеталл", city: "Москва", works: ["токарка", "фрезеровка"], rating: 4.9, reviews: 42, note: "Токарка, фрезеровка, контроль ОТК. Быстро отвечают и держат сроки.", favorite: true },
-    { name: "Северный Цех", city: "Санкт-Петербург", works: ["сварка", "лазер"], rating: 4.6, reviews: 18, note: "Сварные рамы, лазерная резка, сборка узлов.", favorite: true },
-    { name: "Кама CNC", city: "Казань", works: ["фрезеровка"], rating: 4.8, reviews: 27, note: "Чистовая обработка, алюминий и сталь, аккуратная упаковка.", favorite: true },
-    { name: "УралМетСервис", city: "Екатеринбург", works: ["токарка", "сварка"], rating: 4.3, reviews: 11, note: "Средние партии, сварка и токарные работы.", favorite: false },
-    { name: "ЛазерПром", city: "Москва", works: ["лазер"], rating: 4.1, reviews: 9, note: "Резка листа, гибка, маркировка.", favorite: true },
-    { name: "ТитанПро", city: "Москва", works: ["титан", "фрезеровка"], rating: 4.7, reviews: 15, note: "Титановые детали и малые ответственные партии.", favorite: true }
-  ],
-  customerOrders: [
-    { id: 12, title: "Втулки 40Х, 120 шт.", status: "active", date: "26.05.2026", offers: 3, budget: "80 000 - 160 000 ₽", city: "Москва", qty: "120 шт.", material: "Сталь", executor: "не выбран" },
-    { id: 11, title: "Фрезеровка плит 09Г2С", status: "work", date: "24.05.2026", offers: 5, budget: "до 250 000 ₽", city: "Казань", qty: "30 шт.", material: "Сталь", executor: "Кама CNC" },
-    { id: 8, title: "Лазерная резка корпусов", status: "done", date: "15.05.2026", offers: 7, budget: "120 000 ₽", city: "Москва", qty: "80 шт.", material: "Сталь", executor: "ЛазерПром" }
-  ],
-  executorOrders: [
-    { id: 44, title: "Оси 20Х13, 60 шт.", status: "new", date: "26.05.2026", budget: "140 000 ₽", city: "Москва", customer: "Александр Металл", qty: "60 шт.", material: "Сталь", urgency: "средняя", deadline: "08.06.2026", drawing: "PDF" },
-    { id: 41, title: "Алюминиевые кронштейны", status: "offer", date: "25.05.2026", budget: "договорной", city: "Казань", customer: "Кама Деталь", qty: "30 шт.", material: "Алюминий", urgency: "низкая", deadline: "14.06.2026", drawing: "STEP" },
-    { id: 33, title: "Сварная рама под оборудование", status: "work", date: "21.05.2026", budget: "210 000 ₽", city: "Санкт-Петербург", customer: "Север Маш", qty: "2 шт.", material: "Сталь", urgency: "высокая", deadline: "02.06.2026", drawing: "фото" },
-    { id: 30, title: "Титановые шайбы, малая партия", status: "new", date: "20.05.2026", budget: "95 000 ₽", city: "Москва", customer: "МедТех", qty: "45 шт.", material: "Титан", urgency: "средняя", deadline: "11.06.2026", drawing: "PDF" }
-  ],
-  offers: [
-    { company: "ТехноМеталл", rating: 4.9, price: "145 000 ₽", deadline: "9 дней", comment: "Готовы взять в работу после согласования чертежа. Контроль размеров включен." },
-    { company: "Кама CNC", rating: 4.8, price: "158 000 ₽", deadline: "7 дней", comment: "Можем ускорить, если материал ваш. Упаковка до ТК включена." },
-    { company: "ТитанПро", rating: 4.7, price: "162 000 ₽", deadline: "10 дней", comment: "Предлагаем финальный контроль партии и фотоотчет по готовности." }
-  ],
-  messages: [
-    { text: "Добрый день. Когда сможете приступить?", me: false },
-    { text: "Сегодня уточню по материалу и вернусь с точным сроком.", me: true }
-  ],
-  portfolio: [
-    { title: "Корпуса из алюминия", meta: "Фрезеровка · 24 детали", tone: "blue" },
-    { title: "Оси 20Х13", meta: "Токарка · партия 80 шт.", tone: "green" },
-    { title: "Сварная рама", meta: "Сварка · порошковая окраска", tone: "amber" },
-    { title: "Втулки 40Х", meta: "Токарка · контроль размеров", tone: "steel" }
-  ],
-  reviews: [
-    { author: "Александр Металл", stars: "5.0", text: "Срок выдержали, размеры в допуске, по упаковке без вопросов." },
-    { author: "Кама Деталь", stars: "4.8", text: "Хорошая коммуникация и быстрый расчет после уточнения чертежа." }
-  ]
+  selectedOrderId: null,
+  data: emptyData(),
+  apiReady: false
 };
 
 var roleTabs = {
@@ -79,7 +41,7 @@ var roleTabs = {
   executor: [
     ["dashboardView", "Дашборд"],
     ["marketView", "Поиск заказов"],
-    ["ordersView", "Мои заказы"],
+    ["ordersView", "Мои предложения"],
     ["calendarView", "Календарь"],
     ["offersView", "Уведомления"],
     ["portfolioView", "Портфолио"],
@@ -89,6 +51,24 @@ var roleTabs = {
   ]
 };
 
+function emptyData() {
+  return {
+    dashboard: {},
+    week: [0, 0, 0, 0, 0, 0, 0],
+    orders: [],
+    offers: [],
+    executors: [],
+    favorites: [],
+    messages: [],
+    notifications: [],
+    calendar: {},
+    portfolio: [],
+    reviews: [],
+    stats: {},
+    profile: {}
+  };
+}
+
 function h(value) {
   return String(value == null ? "" : value)
     .replace(/&/g, "&amp;")
@@ -97,22 +77,103 @@ function h(value) {
     .replace(/"/g, "&quot;");
 }
 
-function setRole(role) {
-  state.role = roleTabs[role] ? role : "customer";
-  state.orderTab = state.role === "executor" ? "work" : "active";
-  safeSet("mc_role", state.role);
-  $$(".seg").forEach(function (button) {
-    button.classList.toggle("active", button.dataset.role === state.role);
+function normalizeRole(role) {
+  return role === "executor" || role === "customer" ? role : "";
+}
+
+function telegramUser() {
+  var fallback = { id: null, first_name: "Пользователь", username: "" };
+  if (tg && tg.initDataUnsafe && tg.initDataUnsafe.user) return tg.initDataUnsafe.user;
+  return fallback;
+}
+
+function greetingName() {
+  return state.user.first_name || state.user.username || "Пользователь";
+}
+
+function apiHeaders() {
+  var headers = { "Content-Type": "application/json" };
+  if (tg && tg.initData) headers["X-Telegram-Init-Data"] = tg.initData;
+  return headers;
+}
+
+async function apiGet(path) {
+  if (!API_BASE) throw new Error("API не настроен");
+  var response = await fetch(API_BASE + path, { headers: apiHeaders() });
+  if (!response.ok) throw new Error("API " + response.status);
+  return response.json();
+}
+
+async function apiPost(path, body) {
+  if (!API_BASE) throw new Error("API не настроен");
+  var response = await fetch(API_BASE + path, {
+    method: "POST",
+    headers: apiHeaders(),
+    body: JSON.stringify(body || {})
   });
-  renderTabs();
-  setView("dashboardView");
+  if (!response.ok) throw new Error("API " + response.status);
+  return response.json();
+}
+
+async function loadData() {
+  if (!state.role) {
+    renderRoleLocked();
+    return;
+  }
+  safeSet("mc_role", state.role);
+  renderSkeleton();
+  try {
+    var data = await apiGet("/miniapp/bootstrap?role=" + encodeURIComponent(state.role));
+    state.apiReady = true;
+    state.role = normalizeRole(data.role) || state.role;
+    state.data = normalizeData(data);
+  } catch (error) {
+    state.apiReady = false;
+    state.data = emptyData();
+  }
   renderAll();
 }
 
+function normalizeData(data) {
+  var normalized = emptyData();
+  Object.keys(normalized).forEach(function (key) {
+    if (data && data[key] != null) normalized[key] = data[key];
+  });
+  ["orders", "offers"].forEach(function (key) {
+    if (Array.isArray(normalized[key])) {
+      normalized[key] = normalized[key].map(function (item) {
+        item.status = normalizeStatus(item.status);
+        return item;
+      });
+    }
+  });
+  return normalized;
+}
+
+function renderRoleLocked() {
+  $("#welcomeTitle").textContent = "Роль не выбрана";
+  $("#rolePill").textContent = "Откройте из бота";
+  $("#tabs").innerHTML = "";
+  $$(".view").forEach(function (section) { section.classList.remove("active"); });
+  $("#dashboardView").classList.add("active");
+  $("#heroTitle").textContent = "Выберите роль в Telegram";
+  $("#heroText").textContent = "Нажмите /start в боте и выберите «Заказчик» или «Исполнитель». Mini App откроет только интерфейс выбранной роли.";
+  $("#heroActions").innerHTML = "";
+  $("#dashboardMetrics").innerHTML = "";
+  $("#todayFeed").innerHTML = "";
+  $("#weekBars").innerHTML = "";
+}
+
+function renderSkeleton() {
+  $("#welcomeTitle").textContent = state.role === "executor" ? "Кабинет исполнителя" : "Кабинет заказчика";
+  $("#rolePill").textContent = state.role === "executor" ? "Исполнитель" : "Заказчик";
+  renderTabs();
+}
+
 function renderTabs() {
-  var tabs = roleTabs[state.role] || roleTabs.customer;
+  var tabs = roleTabs[state.role] || [];
   $("#tabs").innerHTML = tabs.map(function (item) {
-    return '<button class="tab" data-view="' + item[0] + '" type="button">' + item[1] + "</button>";
+    return '<button class="tab" data-view="' + item[0] + '" type="button">' + h(item[1]) + "</button>";
   }).join("");
   $$("#tabs .tab").forEach(function (button) {
     button.addEventListener("click", function () { setView(button.dataset.view); });
@@ -127,64 +188,112 @@ function setView(view) {
   $$(".view").forEach(function (section) {
     section.classList.toggle("active", section.id === view);
   });
-  if (view === "marketView") renderMarket();
-  if (view === "favoritesView") renderFavorites();
-  if (view === "calendarView") renderCalendar();
-  if (view === "portfolioView") renderPortfolio();
-  if (view === "statsView") renderStats();
+  renderCurrentView();
+}
+
+function renderAll() {
+  renderDashboard();
+  updatePreview();
+  renderOrders();
+  renderMarket();
+  renderFavorites();
+  renderOffers();
+  renderChat();
+  renderCalendar();
+  renderPortfolio();
+  renderStats();
+  renderProfile();
+  setView(state.view || "dashboardView");
+}
+
+function renderCurrentView() {
+  if (state.view === "dashboardView") renderDashboard();
+  if (state.view === "builderView") updatePreview();
+  if (state.view === "ordersView") renderOrders();
+  if (state.view === "marketView") renderMarket();
+  if (state.view === "favoritesView") renderFavorites();
+  if (state.view === "offersView") renderOffers();
+  if (state.view === "chatView") renderChat();
+  if (state.view === "calendarView") renderCalendar();
+  if (state.view === "portfolioView") renderPortfolio();
+  if (state.view === "statsView") renderStats();
+  if (state.view === "profileView") renderProfile();
 }
 
 function renderDashboard() {
   var isExecutor = state.role === "executor";
   $("#welcomeTitle").textContent = isExecutor ? "Кабинет исполнителя" : "Кабинет заказчика";
+  $("#rolePill").textContent = isExecutor ? "Исполнитель" : "Заказчик";
   $("#roleEyebrow").textContent = isExecutor ? "Производство" : "Заказчик";
-  $("#heroTitle").textContent = isExecutor ? "Добрый день, СтанкоМастер! 🔧" : "Добрый день, Александр! 👋";
-  $("#heroText").textContent = isExecutor
-    ? "Новые заказы, предложения, календарь загрузки и портфолио в одном рабочем экране."
-    : "Создавайте заказы, сравнивайте предложения и держите проверенных исполнителей под рукой.";
-
+  $("#heroTitle").textContent = "Добрый день, " + greetingName() + "! " + (isExecutor ? "🔧" : "👋");
+  $("#heroText").textContent = state.apiReady
+    ? (isExecutor ? "Ваши заказы, предложения и загрузка по реальным данным." : "Ваши заказы, предложения и избранные исполнители по реальным данным.")
+    : "Данные из базы появятся после подключения HTTPS API к боту.";
   $("#heroActions").innerHTML = isExecutor
-    ? '<button class="primary" data-go="marketView" type="button">🔍 Поиск заказов</button><button class="ghost" data-go="ordersView" type="button">📋 Мои заказы</button>'
+    ? '<button class="primary" data-go="marketView" type="button">🔍 Поиск заказов</button><button class="ghost" data-go="ordersView" type="button">📋 Мои предложения</button>'
     : '<button class="primary" data-go="builderView" type="button">➕ Новый заказ</button><button class="ghost" data-go="marketView" type="button">🔍 Найти исполнителя</button>';
 
+  var d = state.data.dashboard || {};
   var metrics = isExecutor ? [
-    ["Доступно новых заказов", "12", "по вашим специализациям"],
-    ["Мои активные заказы", "3", "в работе"],
-    ["Выполнено за месяц", "8", "закрытых заказов"],
-    ["Рейтинг", "4.8 ★", "уровень: Профи"]
+    ["Доступно новых заказов", number(d.open_orders_count), "status = open"],
+    ["Мои активные заказы", number(d.active_orders_count), "executor_id = user_id"],
+    ["Выполнено за месяц", number(d.completed_month_count), "status = completed"],
+    ["Рейтинг", d.rating ? d.rating + " ★" : "0 ★", "из профиля"]
   ] : [
-    ["Активных заказов", "3", "1 ждет исполнителя"],
-    ["Новых предложений", "2", "за сегодня"],
-    ["Исполнителей в избранном", countFavorites(), "проверенных компаний"],
-    ["Средний чек", "180k", "по вашим заказам"]
+    ["Активных заказов", number(d.active_orders_count), "open / in_progress"],
+    ["Новых предложений", number(d.pending_offers_count), "pending"],
+    ["Исполнителей в избранном", number(d.favorites_count), "ваш список"],
+    ["Заказов за неделю", sum(state.data.week), "создано"]
   ];
+  $("#dashboardMetrics").innerHTML = metrics.map(metricCard).join("");
+  renderBars();
+  renderFeed();
+}
 
-  $("#dashboardMetrics").innerHTML = metrics.map(function (item) {
-    return '<article class="metric"><span>' + h(item[0]) + '</span><strong>' + h(item[1]) + '</strong><small>' + h(item[2]) + '</small></article>';
-  }).join("");
-
-  var feed = isExecutor ? [
-    ["⚡", "Новый заказ по фрезеровке в Москве, бюджет до 140 000 ₽."],
-    ["🎉", "Ваше предложение по заказу #33 принято."],
-    ["📅", "На этой неделе свободны четверг и пятница."]
-  ] : [
-    ["🔥", "Есть первый отклик по заказу #12."],
-    ["⭐", "ТехноМеталл добавлен в избранное."],
-    ["💬", "Исполнитель задал вопрос по материалу."]
-  ];
-  $("#todayFeed").innerHTML = feed.map(function (item) {
-    return '<div class="event"><i>' + item[0] + '</i><p>' + h(item[1]) + '</p></div>';
-  }).join("");
-  $("#activityTitle").textContent = isExecutor ? "Загрузка по неделе" : "Активность за неделю";
-  $("#activityBadge").textContent = isExecutor ? "календарь" : "живой спрос";
+function metricCard(item) {
+  return '<article class="metric"><span>' + h(item[0]) + '</span><strong>' + h(item[1]) + '</strong><small>' + h(item[2]) + '</small></article>';
 }
 
 function renderBars() {
-  var values = state.role === "executor" ? [40, 70, 82, 65, 88, 34, 20] : [22, 46, 38, 66, 52, 88, 74];
+  var values = Array.isArray(state.data.week) ? state.data.week : [0, 0, 0, 0, 0, 0, 0];
+  var max = Math.max.apply(null, values.concat([1]));
   var days = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
+  $("#activityTitle").textContent = state.role === "executor" ? "Загрузка за неделю" : "Активность за неделю";
+  $("#activityBadge").textContent = state.apiReady ? "по базе" : "нет API";
   $("#weekBars").innerHTML = values.map(function (value, index) {
-    return '<div class="bar"><i style="height:' + value + '%"></i><span>' + days[index] + '</span></div>';
+    var height = Math.max(12, Math.round(value / max * 100));
+    return '<div class="bar"><i style="height:' + height + '%"></i><span>' + days[index] + '</span><b>' + number(value) + '</b></div>';
   }).join("");
+}
+
+function renderFeed() {
+  var items = state.role === "executor" ? state.data.notifications : state.data.notifications;
+  if (!items || !items.length) {
+    $("#profileFill").textContent = state.apiReady ? "Нет новых событий" : "API не подключен";
+    $("#todayFeed").innerHTML = emptyInline("Событий пока нет.");
+    return;
+  }
+  $("#profileFill").textContent = items.length + " событий";
+  $("#todayFeed").innerHTML = items.slice(0, 4).map(function (item) {
+    return '<button class="event as-button" data-go="' + h(item.view || "ordersView") + '" type="button"><i>🔔</i><p>' + h(item.text) + '</p></button>';
+  }).join("");
+}
+
+function updatePreview() {
+  var qty = $("#orderQty").value ? $("#orderQty").value + " шт." : "-";
+  var deadline = $("#orderDeadline").value || "-";
+  var budget = $("#negotiableBudget").checked ? "Договорной" : buildBudget();
+  $("#previewTitle").textContent = $("#orderTitle").value || "Новый заказ";
+  $("#previewDescription").textContent = $("#orderDescription").value || "Заполните поля, и карточка заказа соберется автоматически.";
+  $("#previewMaterial").textContent = state.material;
+  $("#previewQty").textContent = qty;
+  $("#previewCity").textContent = $("#orderCity").value || "-";
+  $("#previewDeadline").textContent = deadline;
+  $("#previewBudget").textContent = budget || "-";
+  var score = orderQualityScore();
+  $("#qualityScore").textContent = score + "%";
+  $("#qualityBar").style.width = score + "%";
+  renderSteps();
 }
 
 function renderSteps() {
@@ -197,26 +306,8 @@ function renderSteps() {
   ];
   var labels = ["Название", "Описание", "Материал", "Кол-во", "Срок/бюджет"];
   $("#orderSteps").innerHTML = labels.map(function (label, index) {
-    return '<div class="step ' + (filled[index] ? "active" : "") + '"><b>' + (index + 1) + '</b><span>' + label + '</span></div>';
+    return '<div class="step ' + (filled[index] ? "active" : "") + '"><b>' + (index + 1) + '</b><span>' + h(label) + '</span></div>';
   }).join("");
-}
-
-function updatePreview() {
-  var qty = $("#orderQty").value + " шт.";
-  var deadline = $("#orderDeadline").value || "-";
-  var budget = $("#negotiableBudget").checked ? "Договорной" : buildBudget();
-  $("#qtyValue").textContent = qty;
-  $("#previewTitle").textContent = $("#orderTitle").value || "Новый заказ";
-  $("#previewDescription").textContent = $("#orderDescription").value || "Заполните поля, и карточка заказа соберется автоматически.";
-  $("#previewMaterial").textContent = state.material;
-  $("#previewQty").textContent = qty;
-  $("#previewCity").textContent = $("#orderCity").value || "-";
-  $("#previewDeadline").textContent = deadline;
-  $("#previewBudget").textContent = budget || "-";
-  var score = orderQualityScore();
-  $("#qualityScore").textContent = score + "%";
-  $("#qualityBar").style.width = score + "%";
-  renderSteps();
 }
 
 function buildBudget() {
@@ -233,11 +324,12 @@ function formatMoney(value) {
 }
 
 function orderQualityScore() {
-  var score = 30;
-  if ($("#orderTitle").value.trim()) score += 12;
-  if ($("#orderDescription").value.trim().length > 20) score += 18;
-  if ($("#orderCity").value.trim()) score += 10;
-  if ($("#orderDeadline").value) score += 10;
+  var score = 0;
+  if ($("#orderTitle").value.trim()) score += 18;
+  if ($("#orderDescription").value.trim().length > 20) score += 24;
+  if ($("#orderCity").value.trim()) score += 14;
+  if ($("#orderQty").value) score += 12;
+  if ($("#orderDeadline").value) score += 14;
   if ($("#negotiableBudget").checked || $("#budgetFrom").value || $("#budgetTo").value) score += 12;
   if ($("#orderFiles").files && $("#orderFiles").files.length) score += Math.min($("#orderFiles").files.length, 5) * 2;
   return Math.min(score, 100);
@@ -247,7 +339,9 @@ function orderPayload() {
   return {
     type: "create_order",
     title: $("#orderTitle").value.trim(),
-    description: ($("#orderDescription").value.trim() + "\nМатериал: " + state.material + "\nКоличество: " + $("#orderQty").value + " шт.").trim(),
+    description: $("#orderDescription").value.trim(),
+    material: state.material,
+    quantity: Number($("#orderQty").value || 0),
     budget: $("#negotiableBudget").checked ? "Договорной" : buildBudget(),
     city: $("#orderCity").value.trim(),
     deadline: $("#orderDeadline").value,
@@ -255,33 +349,34 @@ function orderPayload() {
   };
 }
 
-function publishOrder() {
+async function publishOrder() {
   var payload = orderPayload();
-  if (!payload.title || !$("#orderDescription").value.trim() || !payload.budget || !payload.city || !payload.deadline) {
-    showToast("Заполните название, описание, город, срок и бюджет.");
+  if (!payload.title || !payload.description || !payload.quantity || !payload.budget || !payload.city || !payload.deadline) {
+    showToast("Заполните название, описание, количество, город, срок и бюджет.");
     return;
   }
   if ($("#orderFiles").files && $("#orderFiles").files.length > 5) {
     showToast("Можно приложить до 5 файлов.");
     return;
   }
-  if (tg && tg.sendData) {
-    tg.sendData(JSON.stringify(payload));
-    tg.close();
-  } else {
-    safeSet("mc_last_order", JSON.stringify(payload));
-    showToast("Демо: заказ сохранен локально. В Telegram он отправится в бота.");
+  try {
+    if (API_BASE) await apiPost("/miniapp/orders", payload);
+    else if (tg && tg.sendData) tg.sendData(JSON.stringify(payload));
+    showToast("Заказ отправлен.");
+    await loadData();
+  } catch (error) {
+    showToast("Не удалось отправить заказ. Проверьте API.");
   }
 }
 
 function renderOrders() {
   var isExecutor = state.role === "executor";
-  $("#ordersTitle").textContent = isExecutor ? "Мои заказы исполнителя" : "Мои заказы";
+  $("#ordersTitle").textContent = isExecutor ? "Мои предложения" : "Мои заказы";
   var tabs = isExecutor
-    ? [["work", "🟡 В работе"], ["done", "✅ Выполненные"], ["offer", "⏳ Ожидают ответа"]]
-    : [["active", "🟢 Активные"], ["work", "🟡 В работе"], ["done", "✅ Выполненные"]];
+    ? [["pending", "⏳ Ожидает"], ["accepted", "✅ Принято"], ["declined", "❌ Отклонено"]]
+    : [["open", "🟢 Активные"], ["in_progress", "🟡 В работе"], ["completed", "✅ Выполненные"]];
   $("#orderSubtabs").innerHTML = tabs.map(function (tab) {
-    return '<button class="subtab ' + (state.orderTab === tab[0] ? "active" : "") + '" data-tab="' + tab[0] + '" type="button">' + tab[1] + "</button>";
+    return '<button class="subtab ' + (state.orderTab === tab[0] ? "active" : "") + '" data-tab="' + h(tab[0]) + '" type="button">' + h(tab[1]) + "</button>";
   }).join("");
   $$("#orderSubtabs .subtab").forEach(function (button) {
     button.addEventListener("click", function () {
@@ -290,119 +385,118 @@ function renderOrders() {
     });
   });
 
-  var rows = isExecutor ? state.executorOrders : state.customerOrders;
-  var filtered = rows.filter(function (order) {
-    if (state.orderTab === "active") return order.status === "active" || order.status === "new";
-    return order.status === state.orderTab;
-  });
-  $("#ordersList").innerHTML = filtered.map(function (order) {
-    var statusClass = order.status === "done" ? "done" : order.status === "work" || order.status === "offer" ? "warn" : "";
-    var statusText = statusLabel(order.status);
-    var actions = isExecutor
-      ? '<button class="primary small" data-action="open-offer" data-order="' + order.id + '" type="button">💰 Сделать предложение</button><button class="ghost" data-go="chatView" type="button">💬 Написать заказчику</button><button class="ghost" data-action="postpone" type="button">Перенести срок</button>'
-      : '<button class="primary small" data-go="offersView" type="button">Смотреть предложения</button><button class="ghost" data-go="chatView" type="button">💬 Написать</button><button class="ghost" data-action="finish-order" type="button">Завершить</button>';
-    return '<article class="order-card">' +
-      '<div class="card-head"><div><h3>#' + order.id + ' ' + h(order.title) + '</h3><p>' + h(order.city) + ' · ' + h(order.date) + ' · ' + h(order.budget) + '</p></div><span class="status ' + statusClass + '">' + statusText + '</span></div>' +
-      '<div class="tags"><span class="tag">' + h(order.material || "Металл") + '</span><span class="tag">' + h(order.qty || "партия") + '</span><span class="tag">Предложений: ' + h(order.offers || 0) + '</span><span class="tag">Исполнитель: ' + h(order.executor || order.customer || "не выбран") + '</span></div>' +
-      '<div class="card-actions">' + actions + '</div></article>';
-  }).join("") || '<article class="panel empty"><h2>Пока пусто</h2><p>Здесь появятся заказы после первых действий.</p></article>';
+  var rows = isExecutor ? state.data.offers : state.data.orders;
+  rows = Array.isArray(rows) ? rows : [];
+  var filtered = rows.filter(function (item) { return !state.orderTab || item.status === state.orderTab; });
+  $("#ordersList").innerHTML = filtered.map(isExecutor ? offerRow : orderRow).join("") ||
+    emptyPanel(isExecutor ? "Предложений пока нет" : "Заказов пока нет", isExecutor ? "Откройте поиск заказов и отправьте первое предложение." : "Создайте первый заказ, чтобы получать предложения.");
 }
 
-function statusLabel(status) {
-  var labels = { active: "Ждет исполнителя", new: "Новый", work: "В работе", done: "Выполнен", offer: "Ожидает ответа" };
-  return labels[status] || status;
+function orderRow(order) {
+  return '<article class="order-card">' +
+    '<div class="card-head"><div><h3>#' + h(order.id) + ' ' + h(order.title) + '</h3><p>' + h(order.created_at || "") + ' · ' + h(order.budget || "бюджет не указан") + '</p></div><span class="status ' + statusClass(order.status) + '">' + h(statusLabel(order.status)) + '</span></div>' +
+    '<div class="tags"><span class="tag">' + h(order.material || "Материал не указан") + '</span><span class="tag">' + h(order.quantity || 0) + ' шт.</span><span class="tag">Предложений: ' + h(order.offers_count || 0) + '</span></div>' +
+    '<div class="card-actions"><button class="primary small" data-action="view-offers" data-order="' + h(order.id) + '" type="button">Смотреть предложения</button><button class="ghost" data-action="select-chat" data-order="' + h(order.id) + '" type="button">💬 Чат</button><button class="ghost" data-action="complete-order" data-order="' + h(order.id) + '" type="button">Завершить</button></div></article>';
 }
 
-function renderMarketFilters() {
-  var city = $("#cityFilter").value;
-  var work = $("#workFilter").value;
-  var isExecutor = state.role === "executor";
-  var workOptions = isExecutor
-    ? ["Все материалы", "Сталь", "Алюминий", "Титан", "Пластик"]
-    : ["Все работы", "токарка", "фрезеровка", "сварка", "лазер", "титан"];
-  $("#workFilter").innerHTML = workOptions.map(function (option, index) {
-    var value = index === 0 ? "" : option;
-    return '<option value="' + h(value) + '">' + h(option.charAt(0).toUpperCase() + option.slice(1)) + '</option>';
-  }).join("");
-  $("#cityFilter").value = city || "";
-  $("#workFilter").value = work || "";
-  $(".range").firstChild.textContent = isExecutor ? "Бюджет/приоритет от " : "Рейтинг от ";
+function offerRow(offer) {
+  return '<article class="order-card">' +
+    '<div class="card-head"><div><h3>#' + h(offer.order_id) + ' ' + h(offer.order_title || "Заказ") + '</h3><p>' + h(offer.city || "") + ' · ' + h(offer.price || "цена не указана") + '</p></div><span class="status ' + statusClass(offer.status) + '">' + h(offerStatus(offer.status)) + '</span></div>' +
+    '<p>' + h(offer.comment || "") + '</p><div class="card-actions"><button class="ghost" data-action="select-chat" data-order="' + h(offer.order_id) + '" type="button">💬 Написать заказчику</button></div></article>';
 }
 
 function renderMarket() {
   var isExecutor = state.role === "executor";
-  renderMarketFilters();
   $("#marketTitle").textContent = isExecutor ? "Поиск заказов" : "Поиск исполнителей";
-  var city = $("#cityFilter").value;
-  var work = $("#workFilter").value;
-  var minRating = Number($("#ratingFilter").value);
-  $("#ratingValue").textContent = isExecutor ? minRating.toFixed(1) : minRating.toFixed(1);
-
-  if (isExecutor) {
-    var orders = state.executorOrders.filter(function (order) {
-      return (!city || order.city === city) && (!work || order.material === work);
-    });
-    $("#marketCards").innerHTML = orders.map(function (order) {
-      return '<article class="entity-card order-search-card"><div class="drawing-preview"><span>' + h(order.drawing) + '</span></div>' +
-        '<div class="card-head"><div><h3>#' + order.id + ' ' + h(order.title) + '</h3><p>' + h(order.customer) + ' · ' + h(order.city) + ' · срок: ' + h(order.deadline) + '</p></div><span class="badge neutral">' + h(order.material) + '</span></div>' +
-        '<div class="tags"><span class="tag">' + h(order.qty) + '</span><span class="tag">срочность: ' + h(order.urgency) + '</span><span class="tag">' + h(order.budget) + '</span></div>' +
-        '<div class="card-actions"><button class="primary small" data-action="open-offer" data-order="' + order.id + '" type="button">💰 Сделать предложение</button><button class="ghost" data-go="chatView" type="button">💬 Уточнить</button></div></article>';
-    }).join("") || emptyPanel("Подходящих заказов нет", "Попробуйте убрать город или материал.");
-    return;
-  }
-
-  var filtered = state.executors.filter(function (executor) {
-    return (!city || executor.city === city) && (!work || executor.works.indexOf(work) !== -1) && executor.rating >= minRating;
-  });
-  $("#marketCards").innerHTML = filtered.map(executorCard).join("") || emptyPanel("Ничего не найдено", "Попробуйте снизить рейтинг или убрать фильтр по типу работ.");
+  renderMarketFilters();
+  if (isExecutor) renderOpenOrders();
+  else renderExecutors();
 }
 
-function executorCard(executor) {
-  return '<article class="entity-card"><div class="card-head"><div class="avatar">' + h(executor.name.slice(0, 2).toUpperCase()) + '</div><div><h3>' + h(executor.name) + '</h3><p>' + h(executor.city) + ' · ' + stars(executor.rating) + ' · ' + h(executor.reviews) + ' отзывов</p></div></div>' +
-    '<div class="tags">' + executor.works.map(function (workName) { return '<span class="tag">' + h(workName) + '</span>'; }).join("") + '</div>' +
-    '<p>' + h(executor.note) + '</p>' +
-    '<div class="card-actions"><button class="primary small" data-action="favorite" data-company="' + h(executor.name) + '" type="button">' + (executor.favorite ? "✓ В избранном" : "➕ В избранное") + '</button><button class="ghost" data-go="chatView" type="button">💬 Написать</button><button class="ghost" data-action="order-for" data-company="' + h(executor.name) + '" type="button">Создать заказ для него</button></div></article>';
+function renderMarketFilters() {
+  var isExecutor = state.role === "executor";
+  var selectedWork = $("#workFilter").value;
+  var selectedRange = $("#ratingFilter") ? $("#ratingFilter").value : "0";
+  $("#workFilter").innerHTML = (isExecutor ? ["", "Сталь", "Алюминий", "Титан", "Пластик"] : ["", "токарка", "фрезеровка", "сварка", "лазер"]).map(function (value) {
+    return '<option value="' + h(value) + '">' + h(value || (isExecutor ? "Все материалы" : "Все работы")) + '</option>';
+  }).join("");
+  if ([].some.call($("#workFilter").options, function (option) { return option.value === selectedWork; })) {
+    $("#workFilter").value = selectedWork;
+  }
+  $(".range").innerHTML = isExecutor
+    ? 'Срочность <span id="ratingValue">любая</span><input id="ratingFilter" type="range" min="0" max="3" step="1" value="0">'
+    : 'Рейтинг от <span id="ratingValue">0</span><input id="ratingFilter" type="range" min="0" max="5" step="0.1" value="0">';
+  $("#ratingFilter").value = selectedRange;
+  $("#ratingFilter").addEventListener("input", renderMarket);
+}
+
+function renderOpenOrders() {
+  var city = $("#cityFilter").value;
+  var material = $("#workFilter").value;
+  var rows = (state.data.orders || []).filter(function (order) {
+    return order.status === "open" && (!city || order.city === city) && (!material || order.material === material);
+  });
+  $("#marketCards").innerHTML = rows.map(function (order) {
+    return '<article class="entity-card order-search-card"><div class="drawing-preview"><span>' + h(order.file_preview || "чертеж") + '</span></div>' +
+      '<div class="card-head"><div><h3>#' + h(order.id) + ' ' + h(order.title) + '</h3><p>' + h(order.customer_name || "Заказчик") + ' · ' + h(order.city || "") + ' · до ' + h(order.deadline || "") + '</p></div><span class="badge neutral">' + h(order.material || "") + '</span></div>' +
+      '<div class="tags"><span class="tag">' + h(order.quantity || 0) + ' шт.</span><span class="tag">срочность: ' + h(order.urgency || "не указана") + '</span><span class="tag">' + h(order.budget || "бюджет не указан") + '</span></div>' +
+      '<div class="card-actions"><button class="primary small" data-action="open-offer" data-order="' + h(order.id) + '" type="button">💰 Сделать предложение</button></div></article>';
+  }).join("") || emptyPanel("Открытых заказов нет", "Подходящих заказов по фильтрам не найдено.");
+}
+
+function renderExecutors() {
+  var city = $("#cityFilter").value;
+  var work = $("#workFilter").value;
+  var minRating = Number($("#ratingFilter").value || 0);
+  $("#ratingValue").textContent = minRating.toFixed(1);
+  var rows = (state.data.executors || []).filter(function (executor) {
+    return (!city || executor.city === city) && (!work || (executor.specialization || "").toLowerCase().indexOf(work) !== -1) && Number(executor.rating || 0) >= minRating;
+  });
+  $("#marketCards").innerHTML = rows.map(function (executor) {
+    return '<article class="entity-card"><div class="card-head"><div class="avatar">' + h((executor.company || "?").slice(0, 2).toUpperCase()) + '</div><div><h3>' + h(executor.company || "Исполнитель") + '</h3><p>' + h(executor.city || "") + ' · ' + h(executor.rating || 0) + ' ★</p></div></div>' +
+      '<div class="tags"><span class="tag">' + h(executor.specialization || "специализация не указана") + '</span></div>' +
+      '<div class="card-actions"><button class="primary small" data-action="favorite" data-executor="' + h(executor.id) + '" type="button">❤️ В избранное</button><button class="ghost" data-action="select-chat-user" data-user="' + h(executor.id) + '" type="button">💬 Написать</button></div></article>';
+  }).join("") || emptyPanel("Исполнители не найдены", "Попробуйте изменить фильтры.");
 }
 
 function renderFavorites() {
-  var favorites = state.executors.filter(function (executor) { return executor.favorite; });
-  $("#favoritesCount").textContent = favorites.length + " сохранено";
-  $("#favoritesList").innerHTML = favorites.map(function (executor) {
-    var note = state.favoriteNotes[executor.name] || "";
-    return '<article class="order-card favorite-card"><div class="card-head"><div><h3>' + h(executor.name) + '</h3><p>' + h(executor.city) + ' · ' + stars(executor.rating) + ' · ' + executor.works.join(", ") + '</p></div><button class="ghost" data-action="remove-favorite" data-company="' + h(executor.name) + '" type="button">Убрать</button></div>' +
-      '<label>Личная заметка<textarea rows="2" data-action="favorite-note" data-company="' + h(executor.name) + '">' + h(note) + '</textarea></label>' +
-      '<div class="card-actions"><button class="primary small" data-action="order-for" data-company="' + h(executor.name) + '" type="button">Создать заказ для этого исполнителя</button><button class="ghost" data-go="chatView" type="button">💬 Написать</button></div></article>';
-  }).join("") || emptyPanel("Избранное пустое", "Добавьте исполнителя из поиска.");
+  var rows = state.data.favorites || [];
+  $("#favoritesCount").textContent = rows.length + " сохранено";
+  $("#favoritesList").innerHTML = rows.map(function (executor) {
+    return '<article class="order-card"><div class="card-head"><div><h3>' + h(executor.company || "Исполнитель") + '</h3><p>' + h(executor.city || "") + ' · ' + h(executor.rating || 0) + ' ★</p></div><button class="ghost" data-action="remove-favorite" data-executor="' + h(executor.id) + '" type="button">Удалить</button></div>' +
+      '<div class="card-actions"><button class="primary small" data-go="builderView" type="button">Создать заказ для этого исполнителя</button></div></article>';
+  }).join("") || emptyPanel("Избранное пустое", "Добавляйте исполнителей из поиска кнопкой «❤️ В избранное».");
 }
 
 function renderOffers() {
-  var isExecutor = state.role === "executor";
-  $("#offersTitle").textContent = isExecutor ? "Отклики и уведомления" : "Предложения от исполнителей";
-  $("#offersBadge").textContent = isExecutor ? "3 непрочитано" : state.offers.length + " новых";
-  if (isExecutor) {
-    $("#offersList").innerHTML = [
-      ["🎉", "Ваше предложение по заказу #33 принято.", "Открыть заказ"],
-      ["🔥", "Появился срочный заказ на фрезеровку в Москве.", "Посмотреть"],
-      ["⭐", "Новый отзыв: 5 звезд от заказчика.", "Портфолио"]
-    ].map(function (item) {
-      return '<article class="order-card notice-card"><div class="event"><i>' + item[0] + '</i><p>' + h(item[1]) + '</p></div><button class="ghost" type="button">' + h(item[2]) + '</button></article>';
-    }).join("");
+  if (state.role === "executor") {
+    $("#offersTitle").textContent = "Уведомления";
+    $("#offersBadge").textContent = (state.data.notifications || []).length + " событий";
+    $("#offersList").innerHTML = (state.data.notifications || []).map(function (item) {
+      return '<article class="order-card notice-card"><button class="event as-button" data-action="select-chat" data-order="' + h(item.order_id || "") + '" type="button"><i>🔔</i><p>' + h(item.text) + '</p></button></article>';
+    }).join("") || emptyPanel("Уведомлений нет", "Новые события появятся здесь.");
     return;
   }
-  $("#offersList").innerHTML = state.offers.map(function (offer) {
-    return '<article class="order-card"><div class="card-head"><div><h3>' + h(offer.company) + '</h3><p>' + stars(offer.rating) + ' · срок: ' + h(offer.deadline) + '</p></div><strong>' + h(offer.price) + '</strong></div><p>' + h(offer.comment) + '</p><div class="card-actions"><button class="primary small" data-action="accept-offer" type="button">✅ Принять</button><button class="ghost" data-action="decline-offer" type="button">❌ Отказать</button><button class="ghost" data-go="chatView" type="button">💬 Уточнить</button></div></article>';
-  }).join("");
+  $("#offersTitle").textContent = "Предложения от исполнителей";
+  $("#offersBadge").textContent = (state.data.offers || []).length + " всего";
+  $("#offersList").innerHTML = (state.data.offers || []).map(function (offer) {
+    return '<article class="order-card"><div class="card-head"><div><h3>' + h(offer.executor_company || "Исполнитель") + '</h3><p>' + h(offer.rating || 0) + ' ★ · ' + h(offer.deadline || "срок не указан") + '</p></div><strong>' + h(offer.price || "") + '</strong></div><p>' + h(offer.comment || "") + '</p><div class="card-actions"><button class="primary small" data-action="accept-offer" data-offer="' + h(offer.id) + '" type="button">✅ Принять</button><button class="ghost" data-action="decline-offer" data-offer="' + h(offer.id) + '" type="button">❌ Отказать</button></div></article>';
+  }).join("") || emptyPanel("Предложений пока нет", "Когда исполнители откликнутся, они появятся здесь.");
 }
 
 function renderChat() {
-  var quick = state.role === "executor"
-    ? ["Перенести срок", "Завершить заказ", "Пришлю фото готовности"]
-    : ["Когда сделаете?", "Пришлите примеры работ", "Какая нужна предоплата?"];
-  $("#quickReplies").innerHTML = quick.map(function (text) {
+  var order = findOrder(state.selectedOrderId);
+  $("#chatOrderId").textContent = order ? "#" + order.id : "Заказ";
+  $("#chatOrderTitle").textContent = order ? order.title : "Не выбран";
+  $("#chatOrderMeta").textContent = order ? [order.city, order.quantity ? order.quantity + " шт." : "", order.budget].filter(Boolean).join(" · ") : "Откройте чат из карточки заказа";
+  $("#chatTitle").textContent = order ? "Чат по заказу #" + order.id : "Чат по заказу";
+  var messages = state.selectedOrderId ? (state.data.messages || []).filter(function (message) { return String(message.order_id) === String(state.selectedOrderId); }) : [];
+  $("#messages").innerHTML = messages.map(function (message) {
+    var me = String(message.sender_id) === String(state.user.id);
+    return '<div class="bubble ' + (me ? "me" : "") + '">' + h(message.text) + '</div>';
+  }).join("") || emptyPanel("Сообщений нет", order ? "Напишите первое сообщение по заказу." : "Сначала выберите заказ.");
+  $("#quickReplies").innerHTML = (state.role === "executor" ? ["Перенести срок", "Завершить заказ"] : ["Когда сделаете?", "Пришлите примеры работ"]).map(function (text) {
     return '<button type="button">' + h(text) + '</button>';
-  }).join("");
-  $("#messages").innerHTML = state.messages.map(function (message) {
-    return '<div class="bubble ' + (message.me ? "me" : "") + '">' + h(message.text) + '</div>';
   }).join("");
   $$("#quickReplies button").forEach(function (button) {
     button.addEventListener("click", function () {
@@ -413,153 +507,108 @@ function renderChat() {
 }
 
 function renderCalendar() {
-  var busy = { 3: "work", 4: "work", 8: "offer", 9: "offer", 14: "work", 15: "work", 16: "work", 22: "done", 28: "work" };
+  var now = new Date();
+  $("#calendarMonth").textContent = now.toLocaleString("ru-RU", { month: "long", year: "numeric" });
+  var daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
   var labels = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
   var cells = labels.map(function (label) { return '<div class="calendar-label">' + label + '</div>'; });
-  for (var day = 1; day <= 31; day += 1) {
-    var type = busy[day] || "";
-    cells.push('<button class="day ' + type + '" type="button"><b>' + day + '</b><span>' + dayLabel(type) + '</span></button>');
+  for (var day = 1; day <= daysInMonth; day += 1) {
+    var status = (state.data.calendar || {})[day] || "free";
+    cells.push('<button class="day ' + h(status) + '" data-action="calendar-day" data-day="' + day + '" type="button"><b>' + day + '</b><span>' + h(dayLabel(status)) + '</span></button>');
   }
   $("#calendarGrid").innerHTML = cells.join("");
 }
 
-function dayLabel(type) {
-  if (type === "work") return "занят";
-  if (type === "offer") return "резерв";
-  if (type === "done") return "сдано";
-  return "свободно";
-}
-
 function renderPortfolio() {
-  $("#portfolioGrid").innerHTML = state.portfolio.map(function (item) {
-    return '<article class="portfolio-card ' + item.tone + '"><div></div><h3>' + h(item.title) + '</h3><p>' + h(item.meta) + '</p></article>';
-  }).join("");
-  $("#reviewsList").innerHTML = state.reviews.map(function (review) {
-    return '<article class="order-card"><div class="card-head"><h3>' + h(review.author) + '</h3><span class="status done">' + h(review.stars) + ' ★</span></div><p>' + h(review.text) + '</p></article>';
+  var rows = state.data.portfolio || [];
+  $("#portfolioGrid").innerHTML = rows.map(function (item) {
+    return '<article class="portfolio-card steel"><div></div><h3>' + h(item.title || "Работа") + '</h3><p>' + h(item.description || item.equipment || "") + '</p><button class="ghost" data-action="edit-portfolio" data-item="' + h(item.id) + '" type="button">Редактировать</button></article>';
+  }).join("") || emptyPanel("Портфолио пустое", "Добавьте фото работ, описание оборудования и станков.");
+  $("#reviewsList").innerHTML = (state.data.reviews || []).map(function (review) {
+    return '<article class="order-card"><div class="card-head"><h3>' + h(review.author || "Заказчик") + '</h3><span class="status done">' + h(review.stars || 0) + ' ★</span></div><p>' + h(review.text || "") + '</p></article>';
   }).join("");
 }
 
 function renderStats() {
-  var metrics = [
-    ["Заказов выполнено", "48", "за все время"],
-    ["Средний чек", "8 500 ₽", "по закрытым заказам"],
-    ["Всего заработано", "408 000 ₽", "демо-оценка"],
-    ["Конверсия", "31%", "предложения → заказы"]
-  ];
-  $("#statsMetrics").innerHTML = metrics.map(function (item) {
-    return '<article class="metric"><span>' + h(item[0]) + '</span><strong>' + h(item[1]) + '</strong><small>' + h(item[2]) + '</small></article>';
-  }).join("");
+  var s = state.data.stats || {};
+  $("#financeTotal").textContent = money(s.total_earned || 0);
+  $("#statsMetrics").innerHTML = [
+    ["Заказов выполнено", number(s.completed_orders), "по базе"],
+    ["Средний чек", money(s.average_check || 0), "по завершенным"],
+    ["Всего заработано", money(s.total_earned || 0), "accepted/completed"],
+    ["Конверсия", percent(s.conversion || 0), "предложения → заказы"]
+  ].map(metricCard).join("");
   $("#statsFunnel").innerHTML = [
-    ["Отправлено предложений", 100],
-    ["Получены ответы", 62],
-    ["Приняты в работу", 31]
+    ["Отправлено предложений", number(s.offers_sent)],
+    ["Принято", number(s.offers_accepted)],
+    ["Завершено", number(s.completed_orders)]
   ].map(function (row) {
-    return '<div><span>' + h(row[0]) + '</span><i><em style="width:' + row[1] + '%"></em></i><b>' + row[1] + '%</b></div>';
+    return '<div><span>' + h(row[0]) + '</span><i><em style="width:' + Math.min(Number(row[1]) || 0, 100) + '%"></em></i><b>' + h(row[1]) + '</b></div>';
   }).join("");
-  $("#financeFeed").innerHTML = [
-    ["₽", "Май: 8 заказов, 86 000 ₽ средний чек."],
-    ["↗", "Лучше всего конвертируются заказы с чертежом PDF."],
-    ["★", "Рейтинг 4.8 держит карточку выше в поиске."]
-  ].map(function (item) {
-    return '<div class="event"><i>' + item[0] + '</i><p>' + h(item[1]) + '</p></div>';
-  }).join("");
+  $("#financeFeed").innerHTML = emptyInline("Финансовая сводка появится после завершенных заказов.");
 }
 
 function renderProfile() {
-  var isExecutor = state.role === "executor";
-  $("#profileTitle").textContent = isExecutor ? "Профиль исполнителя" : "Профиль заказчика";
-  var rows = isExecutor ? [
-    ["Публично", "СтанкоМастер · Москва"],
-    ["Специализация", "Токарка, фрезеровка, сварка"],
-    ["Рейтинг", "4.8 ★"],
-    ["График", "Пн-Пт, 09:00-19:00"],
-    ["Приватно", "+7 900 000-00-00"],
-    ["Тариф", "Pro, до 30 заказов"]
-  ] : [
-    ["Имя", "Александр"],
-    ["Компания", "Александр Металл"],
-    ["Город", "Москва"],
-    ["Телефон", "+7 900 000-00-00"],
-    ["История", "12 заказов · 8 завершено"],
-    ["Тариф", "Free"]
-  ];
+  var p = state.data.profile || {};
+  $("#profileTitle").textContent = state.role === "executor" ? "Профиль исполнителя" : "Профиль заказчика";
+  var rows = state.role === "executor"
+    ? [["Компания", "company", p.company], ["Город", "city", p.city], ["Специализация", "specialization", p.specialization], ["Телефон", "phone", p.phone], ["График", "work_schedule", p.work_schedule], ["Рейтинг", "rating", (p.rating || 0) + " ★"]]
+    : [["Имя", "name", greetingName()], ["Компания", "company", p.company], ["Город", "city", p.city], ["Телефон", "phone", p.phone], ["Тип", "customer_type", p.company ? "Юрлицо" : "Физлицо"]];
   $("#profileCard").innerHTML = rows.map(function (row) {
-    return '<div class="profile-line"><span>' + h(row[0]) + '</span><b>' + h(row[1]) + '</b></div>';
-  }).join("") + '<button class="primary" data-action="edit-profile" type="button">Редактировать профиль</button>';
-}
-
-function useTemplate() {
-  $("#orderTitle").value = "Токарная обработка втулок 40Х, 120 шт.";
-  $("#orderCity").value = "Москва";
-  $("#orderDescription").value = "Нужно изготовить партию втулок по чертежу. Материал 40Х. Важны аккуратная упаковка, контроль размеров и доставка до ТК.";
-  $("#budgetFrom").value = "80000";
-  $("#budgetTo").value = "160000";
-  $("#orderQty").value = "120";
-  state.material = "Сталь";
-  $$(".material").forEach(function (button) {
-    button.classList.toggle("active", button.dataset.material === state.material);
-  });
-  updatePreview();
+    var readonly = row[1] === "rating" || row[1] === "customer_type" ? " readonly" : "";
+    return '<label>' + h(row[0]) + '<input data-profile="' + h(row[1]) + '" value="' + h(row[2] || "") + '"' + readonly + '></label>';
+  }).join("") + '<button class="primary" data-action="save-profile" type="button">Сохранить профиль</button>';
 }
 
 function openOffer(orderId) {
-  var order = state.executorOrders.find(function (item) { return String(item.id) === String(orderId); }) || state.executorOrders[0];
-  state.selectedOrder = order;
-  $("#offerModalTitle").textContent = "Предложение по #" + order.id;
+  state.selectedOrderId = orderId;
+  $("#offerModalTitle").textContent = "Предложение по заказу #" + orderId;
   $("#offerPrice").value = "";
   $("#offerDays").value = "";
   $("#offerComment").value = "";
-  if ($("#offerModal").showModal) {
-    $("#offerModal").showModal();
-  } else {
-    $("#offerModal").setAttribute("open", "");
-  }
+  if ($("#offerModal").showModal) $("#offerModal").showModal();
+  else $("#offerModal").setAttribute("open", "");
 }
 
-function submitOffer(event) {
+async function submitOffer(event) {
   event.preventDefault();
   if (event.submitter && event.submitter.value === "cancel") {
     closeOfferModal();
     return;
   }
-  if (!$("#offerPrice").value || !$("#offerDays").value || !$("#offerComment").value.trim()) {
-    showToast("Заполните цену, срок и комментарий.");
+  if (!$("#offerPrice").value || !$("#offerComment").value.trim()) {
+    showToast("Заполните цену и комментарий.");
     return;
   }
-  closeOfferModal();
-  showToast("Предложение отправлено заказчику.");
+  try {
+    await apiPost("/miniapp/offers", {
+      order_id: state.selectedOrderId,
+      price: $("#offerPrice").value,
+      deadline_days: $("#offerDays").value,
+      comment: $("#offerComment").value.trim()
+    });
+    closeOfferModal();
+    showToast("Предложение отправлено.");
+    await loadData();
+  } catch (error) {
+    showToast("Не удалось отправить предложение. Проверьте API.");
+  }
 }
 
 function closeOfferModal() {
-  if ($("#offerModal").close) {
-    $("#offerModal").close();
-  } else {
-    $("#offerModal").removeAttribute("open");
-  }
+  if ($("#offerModal").close) $("#offerModal").close();
+  else $("#offerModal").removeAttribute("open");
 }
 
-function quickOffer() {
-  $("#offerPrice").value = "145000";
-  $("#offerDays").value = "9";
-  $("#offerComment").value = "Готовы взять в работу после согласования чертежа. Материал ваш, доставка до ТК включена.";
-}
-
-function countFavorites() {
-  return state.executors.filter(function (executor) { return executor.favorite; }).length;
-}
-
-function stars(value) {
-  return Number(value).toFixed(1) + " ★";
-}
-
-function emptyPanel(title, text) {
-  return '<article class="panel empty"><h2>' + h(title) + '</h2><p>' + h(text) + '</p></article>';
+function clearOrderForm() {
+  ["orderTitle", "orderCity", "orderDescription", "orderQty", "orderDeadline", "budgetFrom", "budgetTo"].forEach(function (id) {
+    $("#" + id).value = "";
+  });
+  $("#negotiableBudget").checked = false;
+  updatePreview();
 }
 
 function initEvents() {
-  $$(".seg").forEach(function (button) {
-    button.addEventListener("click", function () { setRole(button.dataset.role); });
-  });
   $$(".material").forEach(function (button) {
     button.addEventListener("click", function () {
       state.material = button.dataset.material;
@@ -572,34 +621,40 @@ function initEvents() {
     $("#" + id).addEventListener("change", updatePreview);
   });
   $("#publishOrderBtn").addEventListener("click", publishOrder);
-  $("#useTemplateBtn").addEventListener("click", useTemplate);
+  $("#clearOrderBtn").addEventListener("click", clearOrderForm);
   $("#cityFilter").addEventListener("change", renderMarket);
   $("#workFilter").addEventListener("change", renderMarket);
-  $("#ratingFilter").addEventListener("input", renderMarket);
   $("#offerForm").addEventListener("submit", submitOffer);
-  $("#quickOfferBtn").addEventListener("click", quickOffer);
-  $("#sharePortfolioBtn").addEventListener("click", function () { showToast("Ссылка на портфолио скопирована в демо-режиме."); });
-  $("#chatForm").addEventListener("submit", function (event) {
-    event.preventDefault();
-    var input = $("#chatInput");
-    if (!input.value.trim()) return;
-    state.messages.push({ text: input.value.trim(), me: true });
-    input.value = "";
-    renderChat();
+  $("#quickOfferBtn").addEventListener("click", function () {
+    $("#offerPrice").value = "";
+    $("#offerDays").value = "";
+    $("#offerComment").value = "Готов рассчитать после уточнения чертежа и материала.";
   });
+  $("#sharePortfolioBtn").addEventListener("click", function () { showToast("Ссылка на портфолио появится после подключения API."); });
+  $("#chatForm").addEventListener("submit", sendChatMessage);
   $("#supportBtn").addEventListener("click", function () {
-    if (tg && tg.openTelegramLink) {
-      tg.openTelegramLink("https://t.me/valentinn_nikonov");
-    } else {
-      showToast("Поддержка откроется внутри Telegram.");
-    }
+    if (tg && tg.openTelegramLink) tg.openTelegramLink("https://t.me/valentinn_nikonov");
+    else showToast("Поддержка откроется внутри Telegram.");
   });
-  $("#attachBtn").addEventListener("click", function () { showToast("Прикрепление файлов в чате подключим вместе с backend API."); });
+  $("#attachBtn").addEventListener("click", function () { showToast("Загрузка фото подключается через файловый API."); });
   document.addEventListener("click", handleActionClick);
-  document.addEventListener("input", handleActionInput);
 }
 
-function handleActionClick(event) {
+async function sendChatMessage(event) {
+  event.preventDefault();
+  var text = $("#chatInput").value.trim();
+  if (!text || !state.selectedOrderId) return;
+  try {
+    await apiPost("/miniapp/messages", { order_id: state.selectedOrderId, text: text });
+    $("#chatInput").value = "";
+    await loadData();
+    setView("chatView");
+  } catch (error) {
+    showToast("Не удалось отправить сообщение. Проверьте API.");
+  }
+}
+
+async function handleActionClick(event) {
   var button = event.target.closest("[data-go], [data-action]");
   if (!button) return;
   if (button.dataset.go) {
@@ -608,55 +663,94 @@ function handleActionClick(event) {
   }
   var action = button.dataset.action;
   if (action === "open-offer") openOffer(button.dataset.order);
-  if (action === "favorite") toggleFavorite(button.dataset.company, true);
-  if (action === "remove-favorite") toggleFavorite(button.dataset.company, false);
-  if (action === "order-for") {
-    setView("builderView");
-    $("#orderDescription").value = "Заказ хочу отправить исполнителю: " + button.dataset.company + ". ";
-    updatePreview();
+  if (action === "select-chat" || action === "view-offers") {
+    state.selectedOrderId = button.dataset.order;
+    setView(action === "view-offers" ? "offersView" : "chatView");
   }
-  if (action === "finish-order") showToast("Заказ отмечен как завершенный в демо-режиме.");
-  if (action === "postpone") showToast("Запрос переноса срока подготовлен.");
-  if (action === "accept-offer") showToast("Предложение принято. Исполнитель получит уведомление.");
-  if (action === "decline-offer") showToast("Предложение отклонено.");
-  if (action === "edit-profile") showToast("Редактирование профиля подключим к API профиля.");
+  if (action === "complete-order") await actionPost("/miniapp/orders/" + button.dataset.order + "/complete", {});
+  if (action === "accept-offer") await actionPost("/miniapp/offers/" + button.dataset.offer + "/accept", {});
+  if (action === "decline-offer") await actionPost("/miniapp/offers/" + button.dataset.offer + "/decline", {});
+  if (action === "favorite") await actionPost("/miniapp/favorites", { executor_id: button.dataset.executor });
+  if (action === "remove-favorite") await actionPost("/miniapp/favorites/" + button.dataset.executor + "/delete", {});
+  if (action === "calendar-day") await actionPost("/miniapp/calendar", { day: button.dataset.day });
+  if (action === "save-profile") await saveProfile();
+  if (action === "edit-portfolio") showToast("Редактирование портфолио подключается к API файлов.");
 }
 
-function handleActionInput(event) {
-  if (event.target.dataset.action !== "favorite-note") return;
-  state.favoriteNotes[event.target.dataset.company] = event.target.value;
+async function actionPost(path, body) {
+  try {
+    await apiPost(path, body);
+    await loadData();
+  } catch (error) {
+    showToast("Действие не выполнено. Проверьте API.");
+  }
 }
 
-function toggleFavorite(company, value) {
-  state.executors.forEach(function (executor) {
-    if (executor.name === company) executor.favorite = value;
+async function saveProfile() {
+  var payload = {};
+  $$("[data-profile]").forEach(function (input) {
+    payload[input.dataset.profile] = input.value.trim();
   });
-  renderDashboard();
-  renderMarket();
-  renderFavorites();
+  await actionPost("/miniapp/profile", payload);
 }
 
-function renderAll() {
-  renderDashboard();
-  renderBars();
-  updatePreview();
-  renderOrders();
-  renderMarket();
-  renderFavorites();
-  renderOffers();
-  renderChat();
-  renderCalendar();
-  renderPortfolio();
-  renderStats();
-  renderProfile();
+function findOrder(id) {
+  return (state.data.orders || []).find(function (order) { return String(order.id) === String(id); });
+}
+
+function statusLabel(status) {
+  var labels = { open: "Открыт", in_progress: "В работе", completed: "Выполнен", pending: "Ожидает", accepted: "Принято", declined: "Отклонено" };
+  return labels[status] || status || "Не указан";
+}
+
+function normalizeStatus(status) {
+  var map = { new: "open", work: "in_progress", done: "completed" };
+  return map[status] || status || "";
+}
+
+function offerStatus(status) {
+  return statusLabel(status);
+}
+
+function statusClass(status) {
+  if (status === "completed" || status === "accepted") return "done";
+  if (status === "in_progress" || status === "pending") return "warn";
+  if (status === "declined") return "bad";
+  return "";
+}
+
+function dayLabel(status) {
+  var labels = { free: "свободный", busy: "занятой", partial: "частичный", reserve: "резерв" };
+  return labels[status] || "свободный";
+}
+
+function emptyPanel(title, text) {
+  return '<article class="panel empty"><h2>' + h(title) + '</h2><p>' + h(text) + '</p></article>';
+}
+
+function emptyInline(text) {
+  return '<div class="empty-inline">' + h(text) + '</div>';
+}
+
+function number(value) {
+  return Number(value || 0).toLocaleString("ru-RU");
+}
+
+function money(value) {
+  return Number(value || 0).toLocaleString("ru-RU") + " ₽";
+}
+
+function percent(value) {
+  return Math.round(Number(value || 0) * 100) + "%";
+}
+
+function sum(values) {
+  return (values || []).reduce(function (acc, value) { return acc + Number(value || 0); }, 0);
 }
 
 function showToast(message) {
-  if (tg && tg.showPopup) {
-    tg.showPopup({ message: message });
-  } else {
-    window.alert(message);
-  }
+  if (tg && tg.showPopup) tg.showPopup({ message: message });
+  else window.alert(message);
 }
 
 function safeGet(key, fallback) {
@@ -676,6 +770,5 @@ function safeSet(key, value) {
   return true;
 }
 
-renderTabs();
 initEvents();
-setRole(state.role);
+loadData();

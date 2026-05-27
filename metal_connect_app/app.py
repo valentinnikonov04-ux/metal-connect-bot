@@ -27,6 +27,7 @@ from metal_connect_app.keyboards import (
     role_keyboard,
     status_keyboard,
     support_keyboard,
+    webapp_url,
     work_status_keyboard,
 )
 from metal_connect_app.services import (
@@ -501,8 +502,10 @@ async def command_app(message: Message):
             "Временные HTTPS-туннели нужны только для разработки и могут показывать предупреждения."
         )
         return
+    user = get_user(message.from_user.id)
+    role = user["role"] if user else None
     keyboard = InlineKeyboardMarkup(
-        inline_keyboard=[[InlineKeyboardButton(text="Открыть кабинет", web_app=WebAppInfo(url=WEBAPP_URL))]]
+        inline_keyboard=[[InlineKeyboardButton(text="Открыть кабинет", web_app=WebAppInfo(url=webapp_url(role)))]]
     )
     await message.answer(
         "Открывайте визуальный кабинет METAL CONNECT.\n\n"

@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>METAL CONNECT</title>
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
-  <link rel="stylesheet" href="./styles.css?v=20260527-1">
+  <link rel="stylesheet" href="./styles.css?v=20260527-2">
 </head>
 <body>
   <main class="app-shell">
@@ -14,13 +14,9 @@
         <p class="eyebrow">METAL CONNECT</p>
         <h1 id="welcomeTitle">Рабочий кабинет</h1>
       </div>
+      <span class="role-pill" id="rolePill">Роль не выбрана</span>
       <button class="icon-btn" id="supportBtn" type="button" aria-label="Поддержка">?</button>
     </header>
-
-    <section class="role-switch" aria-label="Роль">
-      <button class="seg active" data-role="customer" type="button">Заказчик</button>
-      <button class="seg" data-role="executor" type="button">Исполнитель</button>
-    </section>
 
     <nav class="tabs" id="tabs" aria-label="Разделы"></nav>
 
@@ -28,8 +24,8 @@
       <section class="hero">
         <div>
           <p class="eyebrow" id="roleEyebrow">Кабинет заказчика</p>
-          <h2 id="heroTitle">Добрый день, Александр!</h2>
-          <p id="heroText">Создавайте заказы, сравнивайте предложения и выбирайте исполнителей напрямую.</p>
+          <h2 id="heroTitle">Добрый день!</h2>
+          <p id="heroText">Данные загружаются из базы.</p>
         </div>
         <div class="hero-actions" id="heroActions"></div>
       </section>
@@ -47,7 +43,7 @@
         <article class="panel">
           <div class="panel-head">
             <h2>Сегодня</h2>
-            <span class="badge neutral" id="profileFill">Профиль 80%</span>
+            <span class="badge neutral" id="profileFill">Профиль</span>
           </div>
           <div class="timeline" id="todayFeed"></div>
         </article>
@@ -59,7 +55,7 @@
         <article class="panel">
           <div class="panel-head">
             <h2>Пошаговое создание заказа</h2>
-            <button class="ghost" id="useTemplateBtn" type="button">Шаблон</button>
+            <button class="ghost" id="clearOrderBtn" type="button">Очистить</button>
           </div>
 
           <div class="steps" id="orderSteps"></div>
@@ -83,10 +79,10 @@
                 <button class="material" data-material="Пластик" type="button">🧴<span>Пластик</span></button>
               </div>
             </fieldset>
-            <label>Количество: <b id="qtyValue">50 шт.</b>
-              <input id="orderQty" type="range" min="1" max="500" step="1" value="50">
+            <label>Количество деталей
+              <input id="orderQty" type="number" inputmode="numeric" min="1" step="1" placeholder="120">
             </label>
-            <label>Срок выполнения
+            <label>Срок выполнения ДО
               <input id="orderDeadline" type="date">
             </label>
             <label>Бюджет от
@@ -110,7 +106,7 @@
             <label class="file-zone wide">
               <input id="orderFiles" type="file" multiple accept="image/*,.pdf">
               <span>Загрузить фото/чертежи до 5 шт.</span>
-              <small id="fileHint">Файлы видны в интерфейсе как демо. Передачу файлов в бота подключим отдельным этапом.</small>
+              <small id="fileHint">Файлы будут прикреплены к заказу после подключения файлового API.</small>
             </label>
           </div>
         </article>
@@ -121,14 +117,14 @@
           <p id="previewDescription">Заполните поля, и карточка заказа соберется автоматически.</p>
           <dl>
             <div><dt>Материал</dt><dd id="previewMaterial">Сталь</dd></div>
-            <div><dt>Количество</dt><dd id="previewQty">50 шт.</dd></div>
+            <div><dt>Количество</dt><dd id="previewQty">-</dd></div>
             <div><dt>Город</dt><dd id="previewCity">-</dd></div>
             <div><dt>Срок</dt><dd id="previewDeadline">-</dd></div>
             <div><dt>Бюджет</dt><dd id="previewBudget">-</dd></div>
           </dl>
           <div class="score">
             <span>Шанс быстрого отклика</span>
-            <b id="qualityScore">65%</b>
+            <b id="qualityScore">0%</b>
             <i><em id="qualityBar"></em></i>
           </div>
           <button class="primary" id="publishOrderBtn" type="button">📢 Опубликовать заказ</button>
@@ -180,7 +176,7 @@
       <section class="panel">
         <div class="panel-head">
           <h2>Избранные исполнители</h2>
-          <span class="badge neutral" id="favoritesCount">5 сохранено</span>
+          <span class="badge neutral" id="favoritesCount">0 сохранено</span>
         </div>
         <p class="panel-copy">Сохраняйте проверенные компании, оставляйте личные заметки и быстро создавайте заказ под конкретного исполнителя.</p>
       </section>
@@ -201,14 +197,14 @@
       <article class="messenger">
         <header>
           <div class="mini-order">
-            <span>#12</span>
-            <b>Втулки 40Х</b>
-            <small>Москва · 120 шт. · 80 000 - 160 000 ₽</small>
+            <span id="chatOrderId">Заказ</span>
+            <b id="chatOrderTitle">Не выбран</b>
+            <small id="chatOrderMeta">Откройте чат из карточки заказа</small>
           </div>
           <div>
             <p class="eyebrow">Чат по заказу</p>
-            <h2 id="chatTitle">#12 Втулки 40Х</h2>
-            <p id="chatMeta">Заказчик и исполнитель видят переписку внутри бота.</p>
+            <h2 id="chatTitle">Чат по заказу</h2>
+            <p id="chatMeta">Сообщения загружаются только по конкретному заказу.</p>
           </div>
           <button class="ghost" id="attachBtn" type="button">📎 Фото</button>
         </header>
@@ -225,7 +221,7 @@
       <section class="panel">
         <div class="panel-head">
           <h2>Календарь загруженности</h2>
-          <span class="badge">Май 2026</span>
+          <span class="badge" id="calendarMonth">Месяц</span>
         </div>
         <p class="panel-copy">Занятые дни видны заказчику при выборе исполнителя и помогают честно обещать сроки.</p>
       </section>
@@ -257,7 +253,7 @@
         <article class="panel">
           <div class="panel-head">
             <h2>Финансы</h2>
-            <span class="badge">408 000 ₽</span>
+          <span class="badge" id="financeTotal">0 ₽</span>
           </div>
           <div class="timeline" id="financeFeed"></div>
         </article>
@@ -303,7 +299,7 @@
       </div>
       <label>Ваша цена
         <input id="offerPrice" type="number" inputmode="numeric" placeholder="145000">
-        <small>Средняя цена по похожим заказам: 150 000 ₽</small>
+        <small>Укажите вашу реальную цену за заказ.</small>
       </label>
       <label>Срок выполнения, дней
         <input id="offerDays" type="number" inputmode="numeric" min="1" max="90" placeholder="9">
@@ -318,6 +314,6 @@
     </form>
   </dialog>
 
-  <script src="./app.js?v=20260527-1"></script>
+  <script src="./app.js?v=20260527-2"></script>
 </body>
 </html>
