@@ -12,6 +12,8 @@ from metal_connect_app.config import WEBAPP_URL
 
 
 def mini_app_button() -> KeyboardButton:
+    if WEBAPP_URL:
+        return KeyboardButton(text="Открыть кабинет", web_app=WebAppInfo(url=WEBAPP_URL))
     return KeyboardButton(text="Открыть кабинет")
 
 
@@ -45,7 +47,7 @@ def main_keyboard(role: Optional[str] = None) -> ReplyKeyboardMarkup:
 def inline_menu(role: Optional[str] = None, is_admin: bool = False) -> InlineKeyboardMarkup:
     rows = []
     if WEBAPP_URL:
-        rows.append([InlineKeyboardButton(text="Открыть Mini App v4", web_app=WebAppInfo(url=WEBAPP_URL))])
+        rows.append([InlineKeyboardButton(text="Открыть кабинет", web_app=WebAppInfo(url=WEBAPP_URL))])
     if role == "customer":
         rows.extend(
             [

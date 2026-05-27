@@ -494,15 +494,15 @@ async def command_app(message: Message):
         await message.answer(
             "Mini App уже подготовлена в папке metal_connect_app/webapp.\n\n"
             "Чтобы открыть ее прямо в Telegram, нужен публичный HTTPS-адрес.\n\n"
-            "Быстрый локальный вариант:\n"
-            "1. Запустите Mini App: python3 -m http.server 8088 --directory metal_connect_app/webapp\n"
-            "2. Сделайте HTTPS-туннель через ngrok/cloudflared.\n"
-            "3. Скопируйте полученный https:// URL в .env как METAL_CONNECT_WEBAPP_URL.\n"
-            "4. Перезапустите бота."
+            "Постоянный вариант:\n"
+            "1. Включите GitHub Pages для папки docs.\n"
+            "2. Скопируйте постоянный GitHub Pages URL в .env как METAL_CONNECT_WEBAPP_URL.\n"
+            "3. Перезапустите бота.\n\n"
+            "Временные HTTPS-туннели нужны только для разработки и могут показывать предупреждения."
         )
         return
     keyboard = InlineKeyboardMarkup(
-        inline_keyboard=[[InlineKeyboardButton(text="Открыть Mini App v4", web_app=WebAppInfo(url=WEBAPP_URL))]]
+        inline_keyboard=[[InlineKeyboardButton(text="Открыть кабинет", web_app=WebAppInfo(url=WEBAPP_URL))]]
     )
     await message.answer(
         "Открывайте визуальный кабинет METAL CONNECT.\n\n"
@@ -1647,7 +1647,7 @@ async def setup_commands():
     )
     if WEBAPP_URL:
         await bot.set_chat_menu_button(
-            menu_button=MenuButtonWebApp(text="METAL CONNECT v4", web_app=WebAppInfo(url=WEBAPP_URL))
+            menu_button=MenuButtonWebApp(text="METAL CONNECT", web_app=WebAppInfo(url=WEBAPP_URL))
         )
 
 

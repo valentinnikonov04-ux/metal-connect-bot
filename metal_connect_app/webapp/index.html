@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>METAL CONNECT</title>
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
-  <link rel="stylesheet" href="./styles.css?v=20260526-5">
+  <link rel="stylesheet" href="./styles.css?v=20260527-1">
 </head>
 <body>
   <main class="app-shell">
@@ -20,7 +20,6 @@
     <section class="role-switch" aria-label="Роль">
       <button class="seg active" data-role="customer" type="button">Заказчик</button>
       <button class="seg" data-role="executor" type="button">Исполнитель</button>
-      <button class="seg" data-role="admin" type="button">Админ</button>
     </section>
 
     <nav class="tabs" id="tabs" aria-label="Разделы"></nav>
@@ -177,6 +176,17 @@
       <section class="cards" id="marketCards"></section>
     </section>
 
+    <section class="view" id="favoritesView">
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Избранные исполнители</h2>
+          <span class="badge neutral" id="favoritesCount">5 сохранено</span>
+        </div>
+        <p class="panel-copy">Сохраняйте проверенные компании, оставляйте личные заметки и быстро создавайте заказ под конкретного исполнителя.</p>
+      </section>
+      <section class="cards-list" id="favoritesList"></section>
+    </section>
+
     <section class="view" id="offersView">
       <section class="panel">
         <div class="panel-head">
@@ -190,6 +200,11 @@
     <section class="view" id="chatView">
       <article class="messenger">
         <header>
+          <div class="mini-order">
+            <span>#12</span>
+            <b>Втулки 40Х</b>
+            <small>Москва · 120 шт. · 80 000 - 160 000 ₽</small>
+          </div>
           <div>
             <p class="eyebrow">Чат по заказу</p>
             <h2 id="chatTitle">#12 Втулки 40Х</h2>
@@ -204,6 +219,49 @@
           <button class="primary" type="submit">Отправить</button>
         </form>
       </article>
+    </section>
+
+    <section class="view" id="calendarView">
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Календарь загруженности</h2>
+          <span class="badge">Май 2026</span>
+        </div>
+        <p class="panel-copy">Занятые дни видны заказчику при выборе исполнителя и помогают честно обещать сроки.</p>
+      </section>
+      <section class="calendar-grid" id="calendarGrid"></section>
+    </section>
+
+    <section class="view" id="portfolioView">
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Портфолио</h2>
+          <button class="ghost" id="sharePortfolioBtn" type="button">Поделиться</button>
+        </div>
+        <p class="panel-copy">Фото работ, отзывы и короткая витрина производственных возможностей.</p>
+      </section>
+      <section class="portfolio-grid" id="portfolioGrid"></section>
+      <section class="cards-list" id="reviewsList"></section>
+    </section>
+
+    <section class="view" id="statsView">
+      <section class="grid metrics" id="statsMetrics"></section>
+      <section class="layout-two">
+        <article class="panel">
+          <div class="panel-head">
+            <h2>Конверсия предложений</h2>
+            <span class="badge neutral">месяц</span>
+          </div>
+          <div class="funnel" id="statsFunnel"></div>
+        </article>
+        <article class="panel">
+          <div class="panel-head">
+            <h2>Финансы</h2>
+            <span class="badge">408 000 ₽</span>
+          </div>
+          <div class="timeline" id="financeFeed"></div>
+        </article>
+      </section>
     </section>
 
     <section class="view" id="profileView">
@@ -234,6 +292,32 @@
     </section>
   </main>
 
-  <script src="./app.js?v=20260526-5"></script>
+  <dialog class="offer-modal" id="offerModal">
+    <form method="dialog" class="offer-box" id="offerForm">
+      <div class="panel-head">
+        <div>
+          <p class="eyebrow">Предложение исполнителя</p>
+          <h2 id="offerModalTitle">Сделать предложение</h2>
+        </div>
+        <button class="icon-btn" value="cancel" type="submit" aria-label="Закрыть">×</button>
+      </div>
+      <label>Ваша цена
+        <input id="offerPrice" type="number" inputmode="numeric" placeholder="145000">
+        <small>Средняя цена по похожим заказам: 150 000 ₽</small>
+      </label>
+      <label>Срок выполнения, дней
+        <input id="offerDays" type="number" inputmode="numeric" min="1" max="90" placeholder="9">
+      </label>
+      <label>Комментарий
+        <textarea id="offerComment" rows="4" placeholder="Материал ваш, доставка до ТК включена, контроль размеров по чертежу."></textarea>
+      </label>
+      <div class="modal-actions">
+        <button class="ghost" id="quickOfferBtn" type="button">Быстрое предложение</button>
+        <button class="primary" value="default" type="submit">📤 Отправить предложение</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="./app.js?v=20260527-1"></script>
 </body>
 </html>

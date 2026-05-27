@@ -97,10 +97,9 @@ def start_tunnel():
         ["ssh", "-o", "StrictHostKeyChecking=no", "-R", f"80:localhost:{PORT}", "serveo.net"]
     )
     webapp_url = wait_for_tunnel_url(process)
-    write_env(webapp_url)
     log("")
     log(f"Mini App HTTPS URL: {webapp_url}")
-    log("URL записан в .env")
+    log("URL используется только для этого запуска и не записывается в .env")
     log("")
     return process, webapp_url
 
@@ -117,6 +116,13 @@ def start_bot(webapp_url: str):
 
 
 def main():
+    if os.environ.get("METAL_CONNECT_ALLOW_TEMP_TUNNEL") != "1":
+        raise SystemExit(
+            "Этот скрипт запускает временный Serveo-туннель и не подходит для стабильной работы.\n"
+            "Для обычного запуска используйте: python3 metal_connect_simple_working.py\n"
+            "Для разработки с временным туннелем: METAL_CONNECT_ALLOW_TEMP_TUNNEL=1 python3 scripts/run_with_miniapp.py"
+        )
+
     http_server = None
     tunnel = None
     bot = None
