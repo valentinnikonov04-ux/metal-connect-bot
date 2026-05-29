@@ -165,8 +165,6 @@ small { color: #A0A0A0; }
 .icon-btn,
 .ghost,
 .primary,
-.seg,
-.tab,
 .subtab {
   min-height: 40px;
   border: 1px solid #FF6B00;
@@ -343,7 +341,6 @@ button.is-loading::before {
 
 .nav-item.active b { color: #FFFFFF; }
 
-.tabs,
 .subtabs,
 .tags,
 .card-actions,
@@ -354,22 +351,17 @@ button.is-loading::before {
   gap: 8px;
 }
 
-.tabs,
 .subtabs {
   overflow: visible;
   padding-bottom: 10px;
 }
 
-.seg,
-.tab,
 .subtab {
   flex: 0 1 auto;
   padding: 9px 12px;
   font-weight: 780;
 }
 
-.seg.active,
-.tab.active,
 .subtab.active {
   border-color: #FF6B00;
   background: #FF6B00;
@@ -726,33 +718,6 @@ input[type="checkbox"] { width: auto; accent-color: #FF6B00; }
   gap: 9px;
 }
 
-.material-grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 8px;
-}
-
-.material {
-  display: grid;
-  gap: 5px;
-  place-items: center;
-  min-height: 78px;
-  border: 1px solid #2A2A2A;
-  border-radius: 8px;
-  background: #202020;
-  color: #FFFFFF;
-  font-size: 22px;
-  font-weight: 850;
-}
-
-.material span { font-size: 13px; }
-
-.material.active {
-  border-color: #FF6B00;
-  background: rgba(255, 107, 0, .12);
-  color: #FF6B00;
-}
-
 .file-zone {
   padding: 14px;
   border: 1px dashed #2A2A2A;
@@ -1078,7 +1043,6 @@ dd {
 }
 
 .error-box,
-.debug-console,
 .api-error {
   position: fixed;
   border: 1px solid #2A2A2A;
@@ -1097,18 +1061,6 @@ dd {
   font: 14px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
-.debug-console {
-  left: 8px;
-  right: 8px;
-  bottom: 8px;
-  z-index: 10000;
-  max-height: 34vh;
-  overflow: auto;
-  padding: 8px;
-  font: 11px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-}
-
-.debug-line.error,
 .api-error strong { color: #FF6B00; }
 
 .api-tools {
@@ -1164,7 +1116,6 @@ dd {
 
   .hero-actions { justify-content: flex-start; }
   .form-grid,
-  .material-grid,
   .steps { grid-template-columns: 1fr; }
   .order-preview { position: static; }
   .messenger header,
@@ -1296,8 +1247,6 @@ dd {
   .icon-btn,
   .ghost,
   .primary,
-  .seg,
-  .tab,
   .subtab {
     min-height: 38px;
     border-radius: 9px;

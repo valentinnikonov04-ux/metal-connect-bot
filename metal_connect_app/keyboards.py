@@ -12,7 +12,7 @@ from aiogram.types import (
 from metal_connect_app.config import API_URL, WEBAPP_URL
 
 NGROK_URL_PATH = Path(".ngrok_url")
-WEBAPP_BUILD = "20260529-metal-premium-1"
+WEBAPP_BUILD = "20260529-clean-miniapp-2"
 
 
 def public_api_url() -> str:

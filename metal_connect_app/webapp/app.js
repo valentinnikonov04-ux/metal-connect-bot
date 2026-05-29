@@ -1,21 +1,12 @@
 window.onerror = function(msg, url, line, col, error) {
-  console.log("Ошибка:", msg, "в", url, "строка", line);
-  debugLog("Ошибка: " + msg + " в " + url + " строка " + line, "error");
   return false;
 };
 
 window.addEventListener("error", function (event) {
-  debugLog("Ошибка Mini App: " + (event.message || "неизвестная ошибка"), "error");
   var errorBox = document.createElement("div");
   errorBox.className = "error-box";
   errorBox.textContent = "Ошибка Mini App: " + (event.message || "неизвестная ошибка");
   document.body.appendChild(errorBox);
-});
-
-window.addEventListener("unhandledrejection", function (event) {
-  var message = event.reason && event.reason.message ? event.reason.message : String(event.reason || "неизвестная ошибка");
-  console.log("Ошибка:", message, "в Promise", "строка", 0);
-  debugLog("Ошибка Promise: " + message, "error");
 });
 
 var tg = window.Telegram && window.Telegram.WebApp ? window.Telegram.WebApp : null;
@@ -29,7 +20,6 @@ var $ = function (selector) { return document.querySelector(selector); };
 var $$ = function (selector) { return Array.prototype.slice.call(document.querySelectorAll(selector)); };
 var params = new URLSearchParams(window.location.search);
 var explicitUserId = params.get("user_id");
-var debugEnabled = params.get("debug") === "1" || safeGet("mc_debug", "") === "1";
 var API_BASE = "";
 var REQUEST_TIMEOUT_MS = 60000;
 
@@ -53,12 +43,7 @@ var state = {
   chatPollBusy: false
 };
 
-debugLog("Загружен, ищу API...");
 API_BASE = resolveApiUrl();
-console.log("[MiniApp] API URL:", API_BASE || "");
-if (API_BASE) debugLog("API URL установлен: " + API_BASE);
-else debugLog("API не найден. Передайте ?api=URL", "error");
-
 var roleTabs = {
   customer: [
     ["homeView", "Меню"],
@@ -145,13 +130,10 @@ function setApiUrl(value) {
   API_BASE = normalizeApiUrl(value);
   if (API_BASE) {
     safeSet("mc_api_url", API_BASE);
-    debugLog("API URL установлен: " + API_BASE);
-    console.log("[MiniApp] API URL:", API_BASE);
     updateApiTools();
     loadData();
     return true;
   }
-  debugLog("API не найден. Передайте ?api=URL", "error");
   updateApiTools();
   return false;
 }
@@ -159,7 +141,6 @@ function setApiUrl(value) {
 function ensureApiConfigured() {
   updateApiTools();
   if (API_BASE) return true;
-  debugLog("API не найден. Передайте ?api=URL", "error");
   return false;
 }
 
@@ -169,20 +150,10 @@ function apiHeaders() {
   return headers;
 }
 
-function apiRequestLog(method, url, body) {
-  debugLog("[API] REQUEST: " + method + " " + url + (body ? " " + JSON.stringify(body) : ""));
-}
-
-function apiResponseLog(response) {
-  debugLog("[API] RESPONSE: " + response.status, response.ok ? "info" : "error");
-}
-
 async function apiGet(path) {
   if (!API_BASE) throw new Error("API не настроен");
   var url = API_BASE + withUserId(path);
-  apiRequestLog("GET", url);
   var response = await fetchWithTimeout(url, { headers: apiHeaders() });
-  apiResponseLog(response);
   if (!response.ok) throw new Error(await apiError(response));
   return response.json();
 }
@@ -191,13 +162,11 @@ async function apiPost(path, body) {
   if (!API_BASE) throw new Error("API не настроен");
   body = withUserBody(body);
   var url = API_BASE + path;
-  apiRequestLog("POST", url, body);
   var response = await fetchWithTimeout(url, {
     method: "POST",
     headers: apiHeaders(),
     body: JSON.stringify(body || {})
   });
-  apiResponseLog(response);
   if (!response.ok) throw new Error(await apiError(response));
   return response.json();
 }
@@ -205,12 +174,10 @@ async function apiPost(path, body) {
 async function apiDelete(path) {
   if (!API_BASE) throw new Error("API не настроен");
   var url = API_BASE + withUserId(path);
-  apiRequestLog("DELETE", url);
   var response = await fetchWithTimeout(url, {
     method: "DELETE",
     headers: apiHeaders()
   });
-  apiResponseLog(response);
   if (!response.ok) throw new Error(await apiError(response));
   return response.json();
 }
@@ -226,7 +193,6 @@ async function fetchWithTimeout(url, options) {
     } catch (error) {
       lastError = error;
       if (attempt || (error.name !== "AbortError" && error.name !== "TypeError")) throw error;
-      debugLog("[API] retry after " + error.name + " " + url, "error");
     } finally {
       clearTimeout(timeout);
     }
@@ -291,7 +257,6 @@ async function loadData() {
     resetPaginationAfterBootstrap();
     if (state.selectedOrderId) await loadChatMessages(state.selectedOrderId);
   } catch (error) {
-    debugLog("LOAD ERROR " + error.message);
     showToast("API ошибка: " + error.message);
     state.apiReady = false;
     state.data = emptyData();
@@ -615,7 +580,6 @@ async function publishOrder() {
   }
   var payload = orderPayload();
   var button = $("#publishOrderBtn");
-  debugLog("CLICK publishOrder");
   if (!payload.title || !payload.description || !payload.quantity || !payload.budget || !payload.city || !payload.deadline) {
     showToast("Заполните название, описание, количество, город, срок и бюджет.");
     return;
@@ -629,7 +593,6 @@ async function publishOrder() {
     if ($("#orderFiles").files && $("#orderFiles").files[0]) {
       payload.file_id = await imageFileToDataUrl($("#orderFiles").files[0], 1280, 0.72);
       payload.file_type = "image_data";
-      debugLog("ORDER file attached name=" + $("#orderFiles").files[0].name);
     }
     if (API_BASE) await apiPost("/api/orders/create", payload);
     else if (tg && tg.sendData) tg.sendData(JSON.stringify(payload));
@@ -638,7 +601,6 @@ async function publishOrder() {
     await refreshAfterOrderCreate();
     setView("ordersView");
   } catch (error) {
-    debugLog("ORDER ERROR " + error.message);
     showToast("Не удалось отправить заказ: " + error.message);
   } finally {
     setButtonLoading(button, false);
@@ -997,7 +959,6 @@ async function submitOffer(event) {
     showToast("Предложение отправлено.");
     await refreshExecutorDataAfterOffer();
   } catch (error) {
-    debugLog("OFFER ERROR " + error.message);
     showToast("Не удалось отправить предложение: " + error.message);
   } finally {
     setButtonLoading(button, false);
@@ -1018,16 +979,6 @@ function clearOrderForm() {
 }
 
 function initEvents() {
-  document.addEventListener("click", logInternalClick, true);
-  document.addEventListener("submit", logInternalSubmit, true);
-  attachStaticButtonLogs();
-  $$(".material").forEach(function (button) {
-    button.addEventListener("click", function () {
-      state.material = button.dataset.material;
-      $$(".material").forEach(function (item) { item.classList.toggle("active", item === button); });
-      updatePreview();
-    });
-  });
   ["orderTitle", "orderCity", "orderDescription", "orderMaterial", "orderQty", "orderDeadline", "budgetFrom", "budgetTo", "negotiableBudget", "orderPayment", "orderFiles"].forEach(function (id) {
     $("#" + id).addEventListener("input", updatePreview);
     $("#" + id).addEventListener("change", updatePreview);
@@ -1044,10 +995,6 @@ function initEvents() {
     $("#offerComment").value = "Готов рассчитать после уточнения чертежа и материала.";
   });
   $("#portfolioAddBtn").addEventListener("click", addPortfolio);
-  $("#portfolioPhoto").addEventListener("change", function () {
-    var file = $("#portfolioPhoto").files && $("#portfolioPhoto").files[0];
-    debugLog("INPUT portfolioPhoto file=" + (file ? file.name : ""));
-  });
   $("#chatForm").addEventListener("submit", sendChatMessage);
   $("#chatPhoto").addEventListener("change", uploadChatPhoto);
   $("#attachBtn").addEventListener("click", function () {
@@ -1071,7 +1018,6 @@ function initEvents() {
 
 async function sendChatMessage(event) {
   event.preventDefault();
-  debugLog("SUBMIT chatForm order_id=" + (state.selectedOrderId || ""));
   var text = $("#chatInput").value.trim();
   if (!state.selectedOrderId) {
     showToast("Сначала выберите заказ для чата.");
@@ -1085,7 +1031,6 @@ async function sendChatMessage(event) {
     setView("chatView");
     scrollMessagesToBottom();
   } catch (error) {
-    debugLog("CHAT ERROR " + error.message);
     showToast("Не удалось отправить сообщение: " + error.message);
   }
 }
@@ -1093,7 +1038,6 @@ async function sendChatMessage(event) {
 async function handleActionClick(event) {
   var button = event.target.closest("[data-go], [data-action]");
   if (!button) return;
-  debugLog("CLICK action=" + (button.dataset.action || "") + " go=" + (button.dataset.go || "") + " id=" + (button.id || ""));
   if (button.dataset.go) {
     if (button.dataset.go === "offersView") state.offerFilterOrderId = null;
     setView(button.dataset.go);
@@ -1153,7 +1097,6 @@ async function addPortfolio() {
     showToast("Добавьте фото или укажите file_id.");
     return;
   }
-  debugLog("SUBMIT portfolio file=" + (fileId ? "yes" : "no") + " text_length=" + text.length);
   try {
     setButtonLoading(button, true, "Добавляю...");
     await actionPost("/api/portfolio/add", { file_id: fileId, description: text, text: text, equipment: equipment, file_type: fileId.indexOf("data:image/") === 0 ? "image_data" : "photo" });
@@ -1174,7 +1117,6 @@ async function actionPost(path, body) {
     await refreshAfterMutation(path);
     return data;
   } catch (error) {
-    debugLog("ACTION ERROR " + error.message);
     showToast("Действие не выполнено: " + error.message);
     return null;
   } finally {
@@ -1189,7 +1131,6 @@ async function actionDelete(path) {
     await apiDelete(path);
     await refreshAfterMutation(path);
   } catch (error) {
-    debugLog("DELETE ERROR " + error.message);
     showToast("Действие не выполнено: " + error.message);
   } finally {
     setButtonLoading(activeButton, false);
@@ -1252,12 +1193,10 @@ async function setCalendarDay(day, status) {
 
 async function setStatsPeriod(period) {
   state.statsPeriod = period || "month";
-  debugLog("CLICK stats-period=" + state.statsPeriod);
   try {
     state.data.stats = await apiGet("/api/stats/executor?period=" + encodeURIComponent(state.statsPeriod));
     renderStats();
   } catch (error) {
-    debugLog("STATS ERROR " + error.message);
     showToast("Не удалось загрузить статистику: " + error.message);
   }
 }
@@ -1471,7 +1410,6 @@ async function loadMoreCustomerOrders(button) {
     page.hasMore = !!data.has_more;
     renderOrders();
   } catch (error) {
-    debugLog("LOAD MORE ORDERS ERROR " + error.message, "error");
     showToast("Не удалось загрузить заказы: " + error.message);
   } finally {
     page.loading = false;
@@ -1495,7 +1433,6 @@ async function loadMoreOpenOrders(button) {
     page.hasMore = !!data.has_more;
     renderMarket();
   } catch (error) {
-    debugLog("LOAD MORE OPEN ORDERS ERROR " + error.message, "error");
     showToast("Не удалось загрузить заказы: " + error.message);
   } finally {
     page.loading = false;
@@ -1537,7 +1474,6 @@ async function uploadChatPhoto() {
     renderChat();
     scrollMessagesToBottom();
   } catch (error) {
-    debugLog("CHAT UPLOAD ERROR " + error.message, "error");
     showToast("Не удалось отправить фото: " + error.message);
   } finally {
     setButtonLoading($("#attachBtn"), false);
@@ -1569,7 +1505,6 @@ async function saveProfile() {
   });
   payload.role = state.role;
   delete payload.rating;
-  debugLog("SUBMIT profile " + JSON.stringify(payload));
   try {
     setButtonLoading(button, true, "Сохраняю...");
     var data = await apiPost("/api/profile/update", payload);
@@ -1577,7 +1512,6 @@ async function saveProfile() {
     renderProfile();
     showToast("Профиль сохранен.");
   } catch (error) {
-    debugLog("PROFILE ERROR " + error.message, "error");
     showToast("Не удалось сохранить профиль: " + error.message);
   } finally {
     setButtonLoading(button, false);
@@ -1603,9 +1537,7 @@ async function loadChatMessages(orderId) {
   try {
     var data = await apiGet("/api/chat/messages?order_id=" + encodeURIComponent(orderId));
     state.data.messages = data.messages || [];
-    debugLog("LOAD chat order_id=" + orderId + " messages=" + state.data.messages.length);
   } catch (error) {
-    debugLog("CHAT LOAD ERROR " + error.message);
     showToast("Не удалось загрузить чат: " + error.message);
   }
 }
@@ -1645,7 +1577,6 @@ async function pollChatMessages() {
       scrollMessagesToBottom();
     }
   } catch (error) {
-    debugLog("CHAT POLL ERROR " + error.message, "error");
   } finally {
     state.chatPollBusy = false;
   }
@@ -1666,7 +1597,6 @@ async function pollLiveData() {
       await refreshExecutorDataAfterOffer();
     }
   } catch (error) {
-    debugLog("LIVE POLL ERROR " + error.message, "error");
   } finally {
     state.pollBusy = false;
   }
@@ -1682,32 +1612,6 @@ function messagesChanged(current, next) {
 function scrollMessagesToBottom() {
   var box = $("#messages");
   if (box) box.scrollTop = box.scrollHeight;
-}
-
-function logInternalClick(event) {
-  var target = event.target.closest("button, input, select, textarea, [data-action], [data-go]");
-  if (!target) return;
-  var name = buttonName(target);
-  debugLog("Кнопка " + name + " нажата");
-  debugLog("EVENT click tag=" + target.tagName.toLowerCase() + " id=" + (target.id || "") + " action=" + (target.dataset ? target.dataset.action || "" : ""));
-}
-
-function logInternalSubmit(event) {
-  debugLog("EVENT submit id=" + (event.target.id || ""));
-}
-
-function attachStaticButtonLogs() {
-  $$("button").forEach(function (button) {
-    if (button.dataset.staticLogBound === "1") return;
-    button.dataset.staticLogBound = "1";
-    button.addEventListener("click", function () {
-      debugLog("STATIC button listener: " + buttonName(button));
-    });
-  });
-}
-
-function buttonName(button) {
-  return button.id || (button.dataset && (button.dataset.action || button.dataset.go)) || button.textContent.trim() || "без имени";
 }
 
 function updateApiTools() {
@@ -1733,7 +1637,6 @@ function initSettings() {
 function saveSetting(control) {
   var value = control.type === "checkbox" ? (control.checked ? "1" : "0") : control.value;
   safeSet(settingStorageKey(control.dataset.setting), value);
-  debugLog("SETTING saved " + control.dataset.setting + "=" + value);
 }
 
 function statusLabel(status) {
@@ -1788,32 +1691,8 @@ function sum(values) {
 }
 
 function showToast(message) {
-  debugLog("TOAST " + message);
   if (tg && tg.showPopup) tg.showPopup({ message: message });
   else window.alert(message);
-}
-
-function debugLog(message, level) {
-  level = level || "info";
-  if (window.console && console.log) {
-    if (level === "error" && console.error) console.error("[MiniApp]", message);
-    else console.log("[MiniApp]", message);
-  }
-  if (!debugEnabled) return;
-  if (typeof $ !== "function" || !document.body) return;
-  var box = $("#debugConsole");
-  if (!box) {
-    box = document.createElement("div");
-    box.id = "debugConsole";
-    box.className = "debug-console";
-    document.body.appendChild(box);
-  }
-  var line = document.createElement("div");
-  line.className = level === "error" ? "debug-line error" : "debug-line";
-  line.textContent = new Date().toLocaleTimeString("ru-RU") + " " + message;
-  box.appendChild(line);
-  while (box.children.length > 30) box.removeChild(box.firstChild);
-  box.scrollTop = box.scrollHeight;
 }
 
 function safeGet(key, fallback) {
