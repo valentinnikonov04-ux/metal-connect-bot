@@ -10,7 +10,7 @@
   <script>
     window.DEFAULT_API_URL = "https://womanless-bunion-concave.ngrok-free.dev";
   </script>
-  <link href="styles.css?v=20260529-clean-miniapp-2" rel="stylesheet">
+  <link href="styles.css?v=20260529-metal-pro-2" rel="stylesheet">
 </head>
 <body>
   <main class="app-shell">
@@ -292,32 +292,27 @@
       </section>
       <section class="panel" id="portfolioPanel">
         <div class="panel-head">
-          <h2>Портфолио</h2>
+          <h2>Мои работы (портфолио)</h2>
         </div>
         <div class="form-grid">
-          <label>Фото работы
+          <label class="wide">Фото работы
             <input id="portfolioPhoto" class="file-input-hidden" type="file" accept="image/*">
-            <small>Можно выбрать фото с телефона или указать Telegram file_id ниже.</small>
+            <small id="portfolioPhotoName">Фото не выбрано</small>
           </label>
-          <button class="ghost wide" data-action="choose-portfolio-photo" type="button">Добавить фото</button>
-          <label>Telegram file_id
-            <input id="portfolioFileId" type="text" placeholder="Необязательно">
-          </label>
+          <button class="ghost wide" data-action="choose-portfolio-photo" type="button">Выбрать фото из галереи</button>
           <label>Описание работы
             <input id="portfolioText" type="text" placeholder="Фрезеровка корпуса, партия 40 шт.">
           </label>
           <label>Оборудование / станки
             <input id="portfolioEquipment" type="text" placeholder="Haas VF-2, Fanuc, лазер 3 кВт">
           </label>
-          <button class="primary wide" id="portfolioAddBtn" type="button">➕ Добавить в портфолио</button>
+          <button class="primary wide" id="portfolioAddBtn" type="button">Сохранить работу</button>
         </div>
       </section>
       <section class="portfolio-grid" id="portfolioGrid"></section>
       <section class="cards-list" id="reviewsList"></section>
     </section>
   </main>
-
-  <nav class="bottom-nav" id="bottomNav" aria-label="Основная навигация"></nav>
 
   <aside class="api-tools" id="apiTools" aria-live="polite">
     <div class="api-error" id="apiMissingPanel" hidden>
@@ -373,6 +368,6 @@
     </form>
   </dialog>
 
-  <script src="app.js?v=20260529-clean-miniapp-2"></script>
+  <script src="app.js?v=20260529-metal-pro-2"></script>
 </body>
 </html>

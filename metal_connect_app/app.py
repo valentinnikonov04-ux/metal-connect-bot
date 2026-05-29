@@ -11,6 +11,7 @@ from aiogram.types import (
     CallbackQuery,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
+    MenuButtonCommands,
     MenuButtonWebApp,
     Message,
     WebAppInfo,
@@ -62,6 +63,7 @@ dp = Dispatcher()
 async def send_menu(chat_id: int, user_id: int):
     user = get_user(user_id)
     role = user["role"] if user else None
+    await update_user_menu_button(chat_id, user_id, role)
     progress_percent, progress_bar = profile_progress(user)
     await bot.send_message(
         chat_id,
@@ -69,7 +71,16 @@ async def send_menu(chat_id: int, user_id: int):
         "METAL CONNECT\n"
         "Прямые заказы и проверенные исполнители в металлообработке.\n\n"
         f"Профиль: {progress_bar} {progress_percent}%",
-        reply_markup=inline_menu(role, is_support_admin(user_id)),
+        reply_markup=inline_menu(role, is_support_admin(user_id), user_id),
+    )
+
+
+async def update_user_menu_button(chat_id: int, user_id: int, role: Optional[str]):
+    if not WEBAPP_URL:
+        return
+    await bot.set_chat_menu_button(
+        chat_id=chat_id,
+        menu_button=MenuButtonWebApp(text="METAL CONNECT", web_app=WebAppInfo(url=webapp_url(role, user_id))),
     )
 
 
@@ -186,8 +197,52 @@ async def finish_profile(message: Message, uid: int, data: dict):
             uid,
         ),
     )
+    if data["role"] == "customer":
+        db_execute(
+            """
+            INSERT INTO customers(user_id, company, city, phone, customer_type, created_at, updated_at)
+            VALUES(?,?,?,?,?,?,?)
+            ON CONFLICT(user_id) DO UPDATE SET
+                company=excluded.company,
+                city=excluded.city,
+                phone=excluded.phone,
+                customer_type=COALESCE(excluded.customer_type, customers.customer_type),
+                updated_at=excluded.updated_at
+            """,
+            (uid, data["company"], data["city"], data["phone"], data.get("customer_type", ""), now_iso(), now_iso()),
+        )
+    if data["role"] == "executor":
+        db_execute(
+            """
+            INSERT INTO executors(user_id, company, city, phone, email, specialization,
+                                  description, work_status, created_at, updated_at)
+            VALUES(?,?,?,?,?,?,?,?,?,?)
+            ON CONFLICT(user_id) DO UPDATE SET
+                company=excluded.company,
+                city=excluded.city,
+                phone=excluded.phone,
+                email=excluded.email,
+                specialization=excluded.specialization,
+                description=excluded.description,
+                work_status=excluded.work_status,
+                updated_at=excluded.updated_at
+            """,
+            (
+                uid,
+                data["company"],
+                data["city"],
+                data["phone"],
+                data["email"],
+                data.get("specialization", ""),
+                data.get("description", ""),
+                data.get("work_status", "Принимаю заказы"),
+                now_iso(),
+                now_iso(),
+            ),
+        )
     db_execute("DELETE FROM executor_equipment_files WHERE executor_id=?", (uid,))
     db_execute("DELETE FROM portfolio_files WHERE executor_id=?", (uid,))
+    db_execute("DELETE FROM portfolio WHERE user_id=?", (uid,))
     for file in data.get("equipment_files", []):
         db_execute(
             """
@@ -197,15 +252,23 @@ async def finish_profile(message: Message, uid: int, data: dict):
             (uid, file["file_id"], file["file_type"], file.get("caption", ""), now_iso()),
         )
     for file in data.get("portfolio_files", []):
+        description = file.get("caption", "")
         db_execute(
             """
             INSERT INTO portfolio_files(executor_id, file_id, file_type, caption, created_at)
             VALUES(?,?,?,?,?)
             """,
-            (uid, file["file_id"], file["file_type"], file.get("caption", ""), now_iso()),
+            (uid, file["file_id"], file["file_type"], description, now_iso()),
+        )
+        db_execute(
+            """
+            INSERT INTO portfolio(user_id, file_id, file_type, description, equipment, created_at)
+            VALUES(?,?,?,?,?,?)
+            """,
+            (uid, file["file_id"], file["file_type"], description, data.get("description", ""), now_iso()),
         )
     state.pop(uid, None)
-    await message.answer("Профиль сохранен.", reply_markup=main_keyboard(data.get("role")))
+    await message.answer("Профиль сохранен.", reply_markup=main_keyboard(data.get("role"), uid))
     await send_menu(message.chat.id, uid)
 
 
@@ -440,11 +503,12 @@ async def show_my_offers(message: Message, user_id: int):
 async def start(message: Message):
     user = ensure_user(message)
     user = get_user(message.from_user.id) or user
+    await update_user_menu_button(message.chat.id, message.from_user.id, user["role"] if user else None)
     await message.answer(
         f"{day_greeting()}, {first_name(user)}!\n\n"
         "Добро пожаловать в METAL CONNECT.\n"
         "Здесь заказчики размещают реальные задачи по металлообработке, а исполнители предлагают цену, срок и свои мощности напрямую.",
-        reply_markup=main_keyboard(user["role"] if user else None),
+        reply_markup=main_keyboard(user["role"] if user else None, message.from_user.id),
     )
     await message.answer("Кем вы будете пользоваться ботом?", reply_markup=role_keyboard())
 
@@ -504,13 +568,10 @@ async def command_app(message: Message):
         return
     user = get_user(message.from_user.id)
     role = user["role"] if user else None
-    keyboard = InlineKeyboardMarkup(
-        inline_keyboard=[[InlineKeyboardButton(text="Открыть кабинет", web_app=WebAppInfo(url=webapp_url(role)))]]
-    )
+    await update_user_menu_button(message.chat.id, message.from_user.id, role)
     await message.answer(
-        "Открывайте визуальный кабинет METAL CONNECT.\n\n"
+        "Кабинет METAL CONNECT открывается через синюю кнопку Metal Connect в левом нижнем углу Telegram.\n\n"
         f"Текущая ссылка: {WEBAPP_URL}",
-        reply_markup=keyboard,
     )
 
 
@@ -809,12 +870,12 @@ async def accept_offer(callback: CallbackQuery):
         return
 
     db_execute(
-        "UPDATE orders SET selected_executor_id=?, status='work', updated_at=? WHERE id=?",
-        (offer["executor_id"], now_iso(), offer["order_id"]),
+        "UPDATE orders SET selected_executor_id=?, executor_id=?, status='work', updated_at=? WHERE id=?",
+        (offer["executor_id"], offer["executor_id"], now_iso(), offer["order_id"]),
     )
     db_execute("UPDATE offers SET status='accepted' WHERE id=?", (offer_id,))
     db_execute(
-        "UPDATE offers SET status='rejected' WHERE order_id=? AND id != ?",
+        "UPDATE offers SET status='declined' WHERE order_id=? AND id != ?",
         (offer["order_id"], offer_id),
     )
 
@@ -847,10 +908,11 @@ async def set_status(callback: CallbackQuery):
     db_execute("UPDATE orders SET status=?, updated_at=? WHERE id=?", (status, now_iso(), order_id))
     await callback.message.answer(f"Статус заказа #{order_id}: {STATUS_LABELS[status]}.")
 
-    if status == "done" and order["selected_executor_id"]:
+    completed_executor_id = order["executor_id"] or order["selected_executor_id"]
+    if status == "done" and completed_executor_id:
         keyboard = InlineKeyboardMarkup(
             inline_keyboard=[
-                [InlineKeyboardButton(text="Поставить оценку", callback_data=f"review:start:{order_id}:{order['selected_executor_id']}")]
+                [InlineKeyboardButton(text="Поставить оценку", callback_data=f"review:start:{order_id}:{completed_executor_id}")]
             ]
         )
         await callback.message.answer("Заказ завершен. Оцените исполнителя.", reply_markup=keyboard)
@@ -901,11 +963,11 @@ async def chat_start(callback: CallbackQuery):
         return
 
     if callback.from_user.id == order["customer_id"]:
-        if not order["selected_executor_id"]:
+        if not order["executor_id"]:
             await callback.message.answer("Сначала выберите исполнителя из откликов.")
             await callback.answer()
             return
-        receiver_id = order["selected_executor_id"]
+        receiver_id = order["executor_id"]
     else:
         receiver_id = order["customer_id"]
 
@@ -1293,7 +1355,7 @@ async def text_support(message: Message):
     await start_support_flow(message)
 
 
-@dp.message(F.text.in_({"Открыть кабинет", "Открыть Mini App", "Открыть мини приложение", "Mini App"}))
+@dp.message(F.text.in_({"Открыть Mini App", "Открыть мини приложение", "Mini App"}))
 async def text_mini_app(message: Message):
     await command_app(message)
 
@@ -1323,7 +1385,7 @@ async def message_flow(message: Message):
         user = get_user(uid)
         await message.answer(
             "Выберите действие в меню.",
-            reply_markup=main_keyboard(user["role"] if user else None),
+            reply_markup=main_keyboard(user["role"] if user else None, uid),
         )
         return
 
@@ -1538,12 +1600,29 @@ async def message_flow(message: Message):
         if not text:
             await message.answer("Сейчас чат принимает текстовые сообщения.")
             return
+        order = db_one("SELECT * FROM orders WHERE id=?", (order_id,))
+        if not order or not order["customer_id"] or not order["executor_id"] or uid not in {order["customer_id"], order["executor_id"]}:
+            state.pop(uid, None)
+            await message.answer("Чат доступен только участникам выбранного заказа.")
+            return
+        if receiver_id not in {order["customer_id"], order["executor_id"]} or receiver_id == uid:
+            state.pop(uid, None)
+            await message.answer("Второй участник чата по этому заказу не выбран.")
+            return
+        created_at = now_iso()
+        db_execute(
+            """
+            INSERT INTO messages(order_id, from_user_id, to_user_id, text, file_id, file_type, created_at)
+            VALUES(?,?,?,?,?,?,?)
+            """,
+            (order_id, uid, receiver_id, text, "", "", created_at),
+        )
         db_execute(
             """
             INSERT INTO chat_messages(order_id, sender_id, receiver_id, text, created_at)
             VALUES(?,?,?,?,?)
             """,
-            (order_id, uid, receiver_id, text, now_iso()),
+            (order_id, uid, receiver_id, text, created_at),
         )
         keyboard = InlineKeyboardMarkup(
             inline_keyboard=[[InlineKeyboardButton(text="Ответить", callback_data=f"chat:with:{order_id}:{uid}")]]
@@ -1648,10 +1727,7 @@ async def setup_commands():
             BotCommand(command="top", description="ТОП исполнителей"),
         ]
     )
-    if WEBAPP_URL:
-        await bot.set_chat_menu_button(
-            menu_button=MenuButtonWebApp(text="METAL CONNECT", web_app=WebAppInfo(url=WEBAPP_URL))
-        )
+    await bot.set_chat_menu_button(menu_button=MenuButtonCommands())
 
 
 async def main():

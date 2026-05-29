@@ -1,11 +1,14 @@
 import base64
 import json
 import logging
+import mimetypes
+import threading
+import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, quote, urlparse
 
-from metal_connect_app.config import API_CORS_ORIGIN, API_HOST, API_PORT
+from metal_connect_app.config import API_CORS_ORIGIN, API_HOST, API_PORT, TOKEN
 from metal_connect_app.database import db_all, db_execute, db_one, init_db
 from metal_connect_app.services import now_iso, user_rating
 
@@ -85,11 +88,31 @@ def db_offer_status(status):
     return OFFER_FROM_API.get(status, status or "new")
 
 
+def order_is_open(status):
+    return (status or "") in {"new", "open"}
+
+
+def order_is_in_progress(status):
+    return (status or "") in {"work", "in_progress"}
+
+
+def offer_is_pending(status):
+    return (status or "") in {"new", "pending"}
+
+
 def int_param(query, name, default=0):
     try:
         return int((query.get(name) or [default])[0] or default)
     except (TypeError, ValueError):
         return default
+
+
+def page_params(query, default_limit=20, max_limit=50):
+    limit = int_param(query, "limit", default_limit)
+    offset = int_param(query, "offset", 0)
+    limit = max(1, min(limit or default_limit, max_limit))
+    offset = max(0, offset)
+    return limit, offset
 
 
 def body_json(handler):
@@ -163,10 +186,10 @@ def data_url_parts(value):
 def ensure_user(user_id, role=None):
     if not user_id:
         return
-    existing = db_one("SELECT id FROM users WHERE id=?", (user_id,))
+    existing = db_one("SELECT id, role FROM users WHERE id=?", (user_id,))
     if existing:
-        if role in {"customer", "executor"}:
-            db_execute("UPDATE users SET role=COALESCE(role, ?), updated_at=? WHERE id=?", (role, now_iso(), user_id))
+        if role in {"customer", "executor"} and not existing["role"]:
+            db_execute("UPDATE users SET role=?, updated_at=? WHERE id=?", (role, now_iso(), user_id))
         return
     db_execute(
         """
@@ -177,11 +200,64 @@ def ensure_user(user_id, role=None):
     )
 
 
+def telegram_api_post(method, payload):
+    if not TOKEN:
+        logging.info("Telegram %s skipped: bot token is empty chat_id=%s", method, payload.get("chat_id"))
+        return
+    logging.info(
+        "Telegram %s queued chat_id=%s text=%s",
+        method,
+        payload.get("chat_id"),
+        str(payload.get("text") or "")[:160],
+    )
+
+    def worker():
+        try:
+            raw = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+            req = urllib.request.Request(
+                f"https://api.telegram.org/bot{TOKEN}/{method}",
+                data=raw,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            urllib.request.urlopen(req, timeout=8).read()
+            logging.info("Telegram %s sent chat_id=%s", method, payload.get("chat_id"))
+        except Exception as exc:
+            logging.warning("Telegram %s failed chat_id=%s error=%s", method, payload.get("chat_id"), exc)
+
+    threading.Thread(target=worker, daemon=True).start()
+
+
+def notify_user(user_id, text, role=None, order_id=None, view=None):
+    if not user_id:
+        return
+    payload = {"chat_id": int(user_id), "text": text}
+    telegram_api_post("sendMessage", payload)
+
+
+def telegram_file_content(file_id):
+    if not TOKEN or not file_id:
+        return None, None
+    try:
+        get_file_url = f"https://api.telegram.org/bot{TOKEN}/getFile?file_id={quote(str(file_id), safe='')}"
+        file_info = json.loads(urllib.request.urlopen(get_file_url, timeout=8).read().decode("utf-8"))
+        file_path = ((file_info.get("result") or {}).get("file_path") or "").lstrip("/")
+        if not file_path:
+            return None, None
+        raw = urllib.request.urlopen(f"https://api.telegram.org/file/bot{TOKEN}/{file_path}", timeout=12).read()
+        content_type = mimetypes.guess_type(file_path)[0] or "application/octet-stream"
+        return raw, content_type
+    except Exception as exc:
+        logging.warning("Telegram file fetch failed file_id=%s error=%s", file_id, exc)
+        return None, None
+
+
 def user_public(user):
     if not user:
         return None
     rating, reviews_count = user_rating(user["id"])
     customer = db_one("SELECT * FROM customers WHERE user_id=?", (user["id"],))
+    executor = db_one("SELECT * FROM executors WHERE user_id=?", (user["id"],))
     data = {
         "id": user["id"],
         "username": user["username"],
@@ -202,6 +278,14 @@ def user_public(user):
         data["city"] = customer["city"] or data["city"]
         data["phone"] = customer["phone"] or data["phone"]
         data["customer_type"] = customer["customer_type"]
+    if executor:
+        data["company"] = executor["company"] or data["company"]
+        data["city"] = executor["city"] or data["city"]
+        data["phone"] = executor["phone"] or data["phone"]
+        data["email"] = executor["email"] or data["email"]
+        data["specialization"] = executor["specialization"] or data["specialization"]
+        data["description"] = executor["description"] or data["description"]
+        data["work_status"] = executor["work_status"] or data["work_status"]
     return data
 
 
@@ -209,12 +293,25 @@ def order_public(order):
     data = row_dict(order)
     if not data:
         return None
+    return normalize_order_public(data, data["id"])
+
+
+def normalize_order_public(data, order_id):
     data["status"] = api_status(data.get("status"))
     data["quantity"] = data.get("quantity") or 0
     raw_file_id = data.get("file_id") or data.get("photo_id") or data.get("file_preview") or ""
     data["has_file"] = bool(raw_file_id)
-    if isinstance(raw_file_id, str) and raw_file_id.startswith("data:image/"):
-        data["file_url"] = f"/api/orders/file?order_id={data['id']}"
+    if isinstance(raw_file_id, str) and raw_file_id.startswith("data:"):
+        data["file_url"] = f"/api/orders/file?order_id={order_id}"
+        if raw_file_id.startswith("data:image/"):
+            data["file_type"] = "image_data"
+        elif raw_file_id.startswith("data:application/pdf"):
+            data["file_type"] = "pdf"
+        data["file_id"] = ""
+        data["photo_id"] = ""
+        data["file_preview"] = "чертеж прикреплен"
+    elif raw_file_id and not str(raw_file_id).startswith(("http://", "https://")):
+        data["file_url"] = f"/api/orders/file?order_id={order_id}"
         data["file_id"] = ""
         data["photo_id"] = ""
         data["file_preview"] = "чертеж прикреплен"
@@ -231,6 +328,9 @@ def offer_public(offer):
     if not data:
         return None
     data["status"] = api_offer_status(data.get("status"))
+    if "file_id" in data or "photo_id" in data or "file_preview" in data:
+        data = normalize_order_public(data, data.get("order_id") or data.get("id"))
+        data["status"] = api_offer_status(offer["status"])
     return data
 
 
@@ -273,13 +373,13 @@ def customer_dashboard(user_id):
 def executor_dashboard(user_id):
     open_count = db_one("SELECT COUNT(*) AS cnt FROM orders WHERE status='new'")["cnt"]
     active = db_one(
-        "SELECT COUNT(*) AS cnt FROM orders WHERE selected_executor_id=? AND status='work'",
+        "SELECT COUNT(*) AS cnt FROM orders WHERE executor_id=? AND status='work'",
         (user_id,),
     )["cnt"]
     completed = db_one(
         """
         SELECT COUNT(*) AS cnt FROM orders
-        WHERE selected_executor_id=? AND status='done'
+        WHERE executor_id=? AND status='done'
           AND strftime('%Y-%m', created_at)=strftime('%Y-%m', 'now')
         """,
         (user_id,),
@@ -294,7 +394,7 @@ def executor_dashboard(user_id):
     }
 
 
-def customer_orders(user_id):
+def customer_orders(user_id, limit=20, offset=0):
     rows = db_all(
         """
         SELECT orders.*,
@@ -302,24 +402,49 @@ def customer_orders(user_id):
         FROM orders
         WHERE customer_id=?
         ORDER BY id DESC
+        LIMIT ? OFFSET ?
         """,
-        (user_id,),
+        (user_id, limit, offset),
     )
     return [order_public(row) for row in rows]
 
 
-def open_orders():
+def open_orders(limit=20, offset=0):
     rows = db_all(
         """
-        SELECT orders.*, users.company AS customer_name, users.city AS customer_city
+        SELECT orders.*,
+               users.company AS customer_name,
+               users.full_name AS customer_full_name,
+               users.city AS customer_city
         FROM orders
         LEFT JOIN users ON users.id=orders.customer_id
         WHERE orders.status='new'
         ORDER BY orders.id DESC
-        LIMIT 100
-        """
+        LIMIT ? OFFSET ?
+        """,
+        (limit, offset),
     )
     return [order_public(row) for row in rows]
+
+
+def can_access_order_chat(user_id, order):
+    executor_id = order["executor_id"] if order else 0
+    return bool(
+        order
+        and user_id
+        and order["customer_id"]
+        and executor_id
+        and user_id in {order["customer_id"], executor_id}
+    )
+
+
+def chat_peer_id(sender_id, order):
+    selected_executor_id = order["executor_id"]
+    if sender_id == order["customer_id"]:
+        return selected_executor_id
+    if sender_id == selected_executor_id:
+        return order["customer_id"]
+    return 0
 
 
 def customer_offers(user_id):
@@ -341,7 +466,10 @@ def customer_offers(user_id):
 def executor_offers(user_id):
     rows = db_all(
         """
-        SELECT offers.*, orders.title AS order_title, orders.city, orders.budget
+        SELECT offers.*, orders.title AS order_title, orders.city, orders.budget,
+               orders.material, orders.quantity, orders.deadline AS order_deadline,
+               orders.customer_id, orders.executor_id, orders.selected_executor_id,
+               orders.file_id, orders.photo_id, orders.file_preview, orders.file_type
         FROM offers
         JOIN orders ON orders.id=offers.order_id
         WHERE offers.executor_id=?
@@ -383,13 +511,29 @@ def portfolio(user_id):
         db_all(
             """
             SELECT id, file_id, file_type,
-                   COALESCE(description, caption, '') AS description,
-                   COALESCE(description, caption, '') AS title,
+                   COALESCE(description, '') AS description,
+                   COALESCE(description, '') AS title,
                    COALESCE(equipment, '') AS equipment,
                    created_at
-            FROM portfolio_files
-            WHERE executor_id=?
+            FROM portfolio
+            WHERE user_id=?
             ORDER BY id DESC
+            """,
+            (user_id,),
+        )
+    )
+
+
+def reviews_for(user_id):
+    return rows_dict(
+        db_all(
+            """
+            SELECT reviews.*, users.company AS author_company, users.full_name AS author_name
+            FROM reviews
+            LEFT JOIN users ON users.id=reviews.from_user_id
+            WHERE reviews.to_user_id=?
+            ORDER BY reviews.id DESC
+            LIMIT 20
             """,
             (user_id,),
         )
@@ -402,23 +546,23 @@ def calendar(user_id):
 
 
 def messages_for(user_id, order_id=0):
-    params = [user_id, user_id, user_id, user_id]
-    order_filter = ""
-    if order_id:
-        order_filter = "AND chat_messages.order_id=?"
-        params.append(order_id)
+    if not order_id:
+        return []
+    params = [user_id, user_id, user_id, user_id, order_id]
     return rows_dict(
         db_all(
-            f"""
-            SELECT chat_messages.*
-            FROM chat_messages
-            JOIN orders ON orders.id=chat_messages.order_id
+            """
+            SELECT messages.*,
+                   messages.from_user_id AS sender_id,
+                   messages.to_user_id AS receiver_id
+            FROM messages
+            JOIN orders ON orders.id=messages.order_id
             WHERE (orders.customer_id=?
                OR orders.selected_executor_id=?
-               OR chat_messages.sender_id=?
-               OR chat_messages.receiver_id=?)
-              {order_filter}
-            ORDER BY chat_messages.id
+               OR messages.from_user_id=?
+               OR messages.to_user_id=?)
+              AND messages.order_id=?
+            ORDER BY messages.id
             """,
             tuple(params),
         )
@@ -430,26 +574,31 @@ def profile_for(user_id):
 
 
 def bootstrap(user_id, role):
+    actual_user = db_one("SELECT role FROM users WHERE id=?", (user_id,))
+    if actual_user and actual_user["role"] in {"customer", "executor"}:
+        role = actual_user["role"]
     if role == "executor":
+        dashboard = executor_dashboard(user_id)
         return {
             "role": role,
             "profile": profile_for(user_id),
-            "dashboard": executor_dashboard(user_id),
+            "dashboard": dashboard,
             "week": [0, 0, 0, 0, 0, 0, 0],
-            "orders": open_orders(),
+            "orders": open_orders(20, 0),
             "offers": executor_offers(user_id),
             "notifications": [],
             "calendar": calendar(user_id),
             "portfolio": portfolio(user_id),
-            "reviews": [],
-            "stats": executor_stats(user_id),
+            "reviews": reviews_for(user_id),
+            "stats": dashboard.get("stats") or executor_stats(user_id),
         }
+    dashboard = customer_dashboard(user_id)
     return {
         "role": role,
         "profile": profile_for(user_id),
-        "dashboard": customer_dashboard(user_id),
-        "week": customer_dashboard(user_id)["week"],
-        "orders": customer_orders(user_id),
+        "dashboard": dashboard,
+        "week": dashboard["week"],
+            "orders": customer_orders(user_id, 20, 0),
         "offers": customer_offers(user_id),
         "executors": executor_list(),
         "favorites": favorite_executors(user_id),
@@ -460,7 +609,7 @@ def bootstrap(user_id, role):
 
 def executor_stats(user_id):
     completed = db_one(
-        "SELECT COUNT(*) AS cnt FROM orders WHERE selected_executor_id=? AND status='done'",
+        "SELECT COUNT(*) AS cnt FROM orders WHERE executor_id=? AND status='done'",
         (user_id,),
     )["cnt"]
     accepted = db_one("SELECT COUNT(*) AS cnt FROM offers WHERE executor_id=? AND status='accepted'", (user_id,))["cnt"]
@@ -508,11 +657,15 @@ class ApiHandler(BaseHTTPRequestHandler):
             log_request(self, "GET", path, user_id)
 
             if path == "/api/me":
-                cache_key = ("me", user_id)
+                requested_role = (query.get("role") or [""])[0]
+                user = db_one("SELECT * FROM users WHERE id=?", (user_id,))
+                if not user and requested_role in {"customer", "executor"}:
+                    ensure_user(user_id, requested_role)
+                    user = db_one("SELECT * FROM users WHERE id=?", (user_id,))
+                cache_key = ("me", user_id, requested_role)
                 if cache_key in RESPONSE_CACHE:
                     self.send_json(RESPONSE_CACHE[cache_key])
                     return
-                user = db_one("SELECT * FROM users WHERE id=?", (user_id,))
                 data = {"user": user_public(user), "role": user["role"] if user else None}
                 RESPONSE_CACHE[cache_key] = data
                 self.send_json(data)
@@ -544,13 +697,24 @@ class ApiHandler(BaseHTTPRequestHandler):
                 if mime and payload:
                     self.send_bytes(base64.b64decode(payload), mime)
                     return
+                if isinstance(value, str) and value.startswith(("http://", "https://")):
+                    self.send_redirect(value)
+                    return
+                raw, content_type = telegram_file_content(value)
+                if raw:
+                    self.send_bytes(raw, content_type)
+                    return
                 self.send_json({"file_id": value, "file_type": order["file_type"] or ""})
                 return
             if path == "/api/orders/customer":
-                self.send_json({"orders": customer_orders(user_id)})
+                limit, offset = page_params(query)
+                orders = customer_orders(user_id, limit, offset)
+                self.send_json({"orders": orders, "limit": limit, "offset": offset, "has_more": len(orders) == limit})
                 return
             if path == "/api/orders/open":
-                self.send_json({"orders": open_orders()})
+                limit, offset = page_params(query)
+                orders = open_orders(limit, offset)
+                self.send_json({"orders": orders, "limit": limit, "offset": offset, "has_more": len(orders) == limit})
                 return
             if path == "/api/offers/customer":
                 self.send_json({"offers": customer_offers(user_id)})
@@ -565,7 +729,14 @@ class ApiHandler(BaseHTTPRequestHandler):
                 self.send_json({"executors": executor_list()})
                 return
             if path == "/api/portfolio":
+                user = db_one("SELECT role FROM users WHERE id=?", (user_id,))
+                if not user or user["role"] != "executor":
+                    self.send_error_json(403, "Portfolio is available only to executor")
+                    return
                 self.send_json({"portfolio": portfolio(user_id)})
+                return
+            if path == "/api/reviews":
+                self.send_json({"reviews": reviews_for(user_id)})
                 return
             if path == "/api/calendar":
                 self.send_json({"calendar": calendar(user_id)})
@@ -574,7 +745,15 @@ class ApiHandler(BaseHTTPRequestHandler):
                 self.send_json(executor_stats(user_id))
                 return
             if path in {"/api/messages", "/api/chat/messages"}:
-                self.send_json({"messages": messages_for(user_id, int_param(query, "order_id"))})
+                order_id = int_param(query, "order_id")
+                if not order_id:
+                    self.send_json({"messages": []})
+                    return
+                order = db_one("SELECT * FROM orders WHERE id=?", (order_id,))
+                if not can_access_order_chat(user_id, order):
+                    self.send_error_json(403, "Chat is available only to order participants")
+                    return
+                self.send_json({"messages": messages_for(user_id, order_id)})
                 return
             if path == "/api/get_ngrok_url":
                 url = public_api_url()
@@ -584,11 +763,23 @@ class ApiHandler(BaseHTTPRequestHandler):
                 })
                 return
             if path == "/api/bootstrap":
-                role = (query.get("role") or [""])[0]
-                if role not in {"customer", "executor"}:
+                requested_role = (query.get("role") or [""])[0]
+                user = db_one("SELECT role FROM users WHERE id=?", (user_id,))
+                if not user and requested_role in {"customer", "executor"}:
+                    ensure_user(user_id, requested_role)
                     user = db_one("SELECT role FROM users WHERE id=?", (user_id,))
-                    role = user["role"] if user and user["role"] in {"customer", "executor"} else "customer"
-                self.send_json(bootstrap(user_id, role))
+                elif user and not user["role"] and requested_role in {"customer", "executor"}:
+                    db_execute("UPDATE users SET role=?, updated_at=? WHERE id=?", (requested_role, now_iso(), user_id))
+                    user = db_one("SELECT role FROM users WHERE id=?", (user_id,))
+                role = user["role"] if user and user["role"] in {"customer", "executor"} else requested_role
+                if role not in {"customer", "executor"}:
+                    role = "customer"
+                cache_key = ("bootstrap", user_id, role)
+                data = RESPONSE_CACHE.get(cache_key)
+                if data is None:
+                    data = bootstrap(user_id, role)
+                    RESPONSE_CACHE[cache_key] = data
+                self.send_json(data)
                 return
 
             self.send_error_json(404, "Not found")
@@ -606,7 +797,16 @@ class ApiHandler(BaseHTTPRequestHandler):
             clear_cache()
 
             if path == "/api/orders/create":
-                ensure_user(user_id, "customer")
+                requested_role = body.get("role") if body.get("role") in {"customer", "executor"} else None
+                if requested_role == "executor":
+                    self.send_error_json(403, "Only customer can create order")
+                    return
+                user = db_one("SELECT role FROM users WHERE id=?", (user_id,))
+                if not user:
+                    ensure_user(user_id, "customer")
+                elif user["role"] != "customer":
+                    self.send_error_json(403, "Only customer can create order")
+                    return
                 file_id = body.get("file_id") or body.get("photo_id") or ""
                 file_type = body.get("file_type") or ("image_data" if str(file_id).startswith("data:image/") else "")
                 order_id = db_execute(
@@ -654,6 +854,9 @@ class ApiHandler(BaseHTTPRequestHandler):
                 if not order:
                     self.send_error_json(404, "Order not found")
                     return
+                if order["status"] != "new":
+                    self.send_error_json(400, "Only open order can be edited")
+                    return
                 fields = {
                     "title": body.get("title"),
                     "description": body.get("description") or body.get("desc"),
@@ -685,10 +888,14 @@ class ApiHandler(BaseHTTPRequestHandler):
 
             if path == "/api/orders/cancel":
                 order_id = int(body["order_id"])
-                db_execute(
-                    "UPDATE orders SET status='cancelled', updated_at=? WHERE id=? AND customer_id=?",
-                    (now_iso(), order_id, user_id),
-                )
+                order = db_one("SELECT * FROM orders WHERE id=? AND customer_id=?", (order_id, user_id))
+                if not order:
+                    self.send_error_json(404, "Order not found")
+                    return
+                if order["status"] in {"done", "cancelled"}:
+                    self.send_error_json(400, "Order is already closed")
+                    return
+                db_execute("UPDATE orders SET status='cancelled', updated_at=? WHERE id=?", (now_iso(), order_id))
                 self.send_json({"ok": True})
                 return
 
@@ -702,33 +909,65 @@ class ApiHandler(BaseHTTPRequestHandler):
                 return
 
             if path == "/api/offers/create":
-                offer_id = db_execute(
-                    """
-                    INSERT INTO offers(order_id, executor_id, price, deadline, comment, status, created_at)
-                    VALUES(?,?,?,?,?,?,?)
-                    ON CONFLICT(order_id, executor_id)
-                    DO UPDATE SET price=excluded.price,
-                                  deadline=excluded.deadline,
-                                  comment=excluded.comment,
-                                  status=offers.status,
-                                  created_at=excluded.created_at
-                    """,
-                    (
-                        int(body["order_id"]),
-                        user_id,
-                        str(body.get("price") or ""),
-                        str(body.get("deadline") or body.get("deadline_days") or ""),
-                        body.get("comment") or "",
-                        "new",
-                        now_iso(),
-                    ),
+                order_id = int(body["order_id"])
+                order = db_one("SELECT * FROM orders WHERE id=?", (order_id,))
+                if not order:
+                    self.send_error_json(404, "Order not found")
+                    return
+                user = db_one("SELECT role FROM users WHERE id=?", (user_id,))
+                if not user or user["role"] != "executor":
+                    self.send_error_json(403, "Only executor can create offer")
+                    return
+                if order["customer_id"] == user_id:
+                    self.send_error_json(400, "Cannot create offer for own order")
+                    return
+                if not order_is_open(order["status"]):
+                    self.send_error_json(400, "Order is not open for offers")
+                    return
+                existing_offer = db_one(
+                    "SELECT id, status FROM offers WHERE order_id=? AND executor_id=?",
+                    (order_id, user_id),
                 )
-                if not offer_id:
-                    offer = db_one(
-                        "SELECT id FROM offers WHERE order_id=? AND executor_id=?",
-                        (int(body["order_id"]), user_id),
+                if existing_offer and offer_is_pending(existing_offer["status"]):
+                    self.send_error_json(409, "Pending offer already exists")
+                    return
+                if existing_offer and existing_offer["status"] == "accepted":
+                    self.send_error_json(409, "Offer is already accepted")
+                    return
+                offer_values = (
+                    order_id,
+                    user_id,
+                    str(body.get("price") or ""),
+                    str(body.get("deadline") or body.get("deadline_days") or ""),
+                    body.get("comment") or "",
+                    "new",
+                    now_iso(),
+                )
+                if existing_offer:
+                    offer_id = existing_offer["id"]
+                    db_execute(
+                        """
+                        UPDATE offers
+                        SET price=?, deadline=?, comment=?, status='new', created_at=?
+                        WHERE id=?
+                        """,
+                        (offer_values[2], offer_values[3], offer_values[4], offer_values[6], offer_id),
                     )
-                    offer_id = offer["id"] if offer else None
+                else:
+                    offer_id = db_execute(
+                        """
+                        INSERT INTO offers(order_id, executor_id, price, deadline, comment, status, created_at)
+                        VALUES(?,?,?,?,?,?,?)
+                        """,
+                        offer_values,
+                    )
+                notify_user(
+                    order["customer_id"],
+                    f"Новое предложение по заказу №{order['id']} «{order['title']}»: {body.get('price') or 'цена не указана'}.",
+                    "customer",
+                    order["id"],
+                    "offersView",
+                )
                 self.send_json({"ok": True, "offer_id": offer_id})
                 return
 
@@ -740,6 +979,16 @@ class ApiHandler(BaseHTTPRequestHandler):
                     return
                 order_id = int(body.get("order_id") or offer["order_id"])
                 executor_id = int(body.get("executor_id") or offer["executor_id"])
+                order = db_one("SELECT * FROM orders WHERE id=? AND customer_id=?", (order_id, user_id))
+                if not order:
+                    self.send_error_json(403, "Offer can be accepted only by order customer")
+                    return
+                if not order_is_open(order["status"]):
+                    self.send_error_json(400, "Only open order can accept offer")
+                    return
+                if not offer_is_pending(offer["status"]):
+                    self.send_error_json(400, "Only pending offer can be accepted")
+                    return
                 db_execute("UPDATE offers SET status='accepted' WHERE id=?", (offer_id,))
                 db_execute("UPDATE offers SET status='declined' WHERE order_id=? AND id!=?", (order_id, offer_id))
                 db_execute(
@@ -750,25 +999,74 @@ class ApiHandler(BaseHTTPRequestHandler):
                     """,
                     (executor_id, executor_id, now_iso(), order_id),
                 )
+                notify_user(
+                    executor_id,
+                    f"Ваше предложение по заказу #{order_id} принято. Откройте чат по заказу.",
+                    "executor",
+                    order_id,
+                    "chatView",
+                )
                 self.send_json({"ok": True})
                 return
 
             if path == "/api/offers/decline":
-                db_execute("UPDATE offers SET status='declined' WHERE id=?", (int(body["offer_id"]),))
+                offer_id = int(body["offer_id"])
+                offer = db_one("SELECT * FROM offers WHERE id=?", (offer_id,))
+                if offer:
+                    order = db_one("SELECT * FROM orders WHERE id=? AND customer_id=?", (offer["order_id"], user_id))
+                    if not order:
+                        self.send_error_json(403, "Offer can be declined only by order customer")
+                        return
+                    if not order_is_open(order["status"]) or not offer_is_pending(offer["status"]):
+                        self.send_error_json(400, "Only pending offer on open order can be declined")
+                        return
+                db_execute("UPDATE offers SET status='declined' WHERE id=?", (offer_id,))
+                if offer:
+                    notify_user(
+                        offer["executor_id"],
+                        f"Ваше предложение по заказу #{offer['order_id']} отклонено.",
+                        "executor",
+                        offer["order_id"],
+                        "ordersView",
+                    )
                 self.send_json({"ok": True})
                 return
 
             if path == "/api/orders/complete":
+                order_id = int(body["order_id"])
+                order = db_one("SELECT * FROM orders WHERE id=? AND customer_id=?", (order_id, user_id))
+                if not order:
+                    self.send_error_json(403, "Order can be completed only by customer")
+                    return
+                if not order_is_in_progress(order["status"]):
+                    self.send_error_json(400, "Only order in progress can be completed")
+                    return
                 db_execute(
                     "UPDATE orders SET status='done', updated_at=? WHERE id=?",
-                    (now_iso(), int(body["order_id"])),
+                    (now_iso(), order_id),
                 )
+                if order["selected_executor_id"] or order["executor_id"]:
+                    notify_user(
+                        order["selected_executor_id"] or order["executor_id"],
+                        f"Заказ #{order_id} завершен. Заказчик может оставить отзыв.",
+                        "executor",
+                        order_id,
+                        "ordersView",
+                    )
                 self.send_json({"ok": True})
                 return
 
             if path == "/api/favorites/add":
                 path = "/api/favorites"
             if path == "/api/favorites":
+                user = db_one("SELECT role FROM users WHERE id=?", (user_id,))
+                if not user or user["role"] != "customer":
+                    self.send_error_json(403, "Only customer can add executor to favorites")
+                    return
+                executor = db_one("SELECT id FROM users WHERE id=? AND role='executor'", (int(body["executor_id"]),))
+                if not executor:
+                    self.send_error_json(404, "Executor not found")
+                    return
                 db_execute(
                     "INSERT OR IGNORE INTO favorites(user_id, target_id, created_at) VALUES(?,?,?)",
                     (user_id, int(body["executor_id"]), now_iso()),
@@ -779,10 +1077,24 @@ class ApiHandler(BaseHTTPRequestHandler):
             if path == "/api/portfolio/add":
                 path = "/api/portfolio"
             if path == "/api/portfolio":
+                user = db_one("SELECT role FROM users WHERE id=?", (user_id,))
+                if not user or user["role"] != "executor":
+                    self.send_error_json(403, "Portfolio is available only to executor")
+                    return
                 file_id = body.get("file_id") or body.get("photo_id") or ""
+                if not file_id:
+                    self.send_error_json(400, "Portfolio photo is required")
+                    return
                 description = body.get("description") or body.get("text") or body.get("caption") or ""
                 equipment = body.get("equipment") or ""
                 portfolio_id = db_execute(
+                    """
+                    INSERT INTO portfolio(user_id, file_id, file_type, description, equipment, created_at)
+                    VALUES(?,?,?,?,?,?)
+                    """,
+                    (user_id, file_id, body.get("file_type") or "photo", description, equipment, now_iso()),
+                )
+                db_execute(
                     """
                     INSERT INTO portfolio_files(executor_id, file_id, file_type, caption, description, equipment, created_at)
                     VALUES(?,?,?,?,?,?,?)
@@ -807,8 +1119,12 @@ class ApiHandler(BaseHTTPRequestHandler):
                 return
 
             if path == "/api/profile/update":
-                role = body.get("role") if body.get("role") in {"customer", "executor"} else None
-                ensure_user(user_id, role)
+                requested_role = body.get("role") if body.get("role") in {"customer", "executor"} else None
+                ensure_user(user_id, requested_role)
+                actual_user = db_one("SELECT role FROM users WHERE id=?", (user_id,))
+                role = actual_user["role"] if actual_user and actual_user["role"] in {"customer", "executor"} else requested_role
+                if role not in {"customer", "executor"}:
+                    role = "customer"
                 db_execute(
                     """
                     UPDATE users
@@ -827,6 +1143,43 @@ class ApiHandler(BaseHTTPRequestHandler):
                         user_id,
                     ),
                 )
+                if role == "executor":
+                    db_execute(
+                        """
+                        INSERT INTO executors(user_id, company, city, phone, email, specialization,
+                                              description, work_status, created_at, updated_at)
+                        VALUES(?,?,?,?,?,?,?,?,?,?)
+                        ON CONFLICT(user_id) DO UPDATE SET
+                            company=COALESCE(excluded.company, executors.company),
+                            city=COALESCE(excluded.city, executors.city),
+                            phone=COALESCE(excluded.phone, executors.phone),
+                            email=COALESCE(excluded.email, executors.email),
+                            specialization=COALESCE(excluded.specialization, executors.specialization),
+                            description=COALESCE(excluded.description, executors.description),
+                            work_status=COALESCE(excluded.work_status, executors.work_status),
+                            updated_at=excluded.updated_at
+                        """,
+                        (
+                            user_id,
+                            body.get("company"),
+                            body.get("city"),
+                            body.get("phone"),
+                            body.get("email"),
+                            body.get("specialization"),
+                            body.get("description"),
+                            body.get("work_schedule") or body.get("work_status"),
+                            now_iso(),
+                            now_iso(),
+                        ),
+                    )
+                    db_execute(
+                        """
+                        UPDATE users
+                        SET description=COALESCE(?, description), email=COALESCE(?, email), updated_at=?
+                        WHERE id=?
+                        """,
+                        (body.get("description"), body.get("email"), now_iso(), user_id),
+                    )
                 if body.get("customer_type") is not None or role == "customer":
                     db_execute(
                         """
@@ -849,6 +1202,39 @@ class ApiHandler(BaseHTTPRequestHandler):
                             now_iso(),
                         ),
                     )
+                self.send_json({"ok": True, "profile": profile_for(user_id)})
+                return
+
+            if path in {"/api/reviews/add", "/api/reviews"}:
+                order_id = int(body["order_id"])
+                stars = max(1, min(5, int(body.get("stars") or 5)))
+                order = db_one("SELECT * FROM orders WHERE id=? AND customer_id=?", (order_id, user_id))
+                if not order:
+                    self.send_error_json(403, "Review can be created only by order customer")
+                    return
+                if (order["status"] or "") not in {"done", "completed"}:
+                    self.send_error_json(400, "Review is available only for completed order")
+                    return
+                executor_id = order["selected_executor_id"] or order["executor_id"]
+                if not executor_id:
+                    self.send_error_json(400, "Order executor is not selected")
+                    return
+                db_execute(
+                    """
+                    INSERT INTO reviews(order_id, from_user_id, to_user_id, stars, text, created_at)
+                    VALUES(?,?,?,?,?,?)
+                    ON CONFLICT(order_id, from_user_id, to_user_id)
+                    DO UPDATE SET stars=excluded.stars, text=excluded.text, created_at=excluded.created_at
+                    """,
+                    (order_id, user_id, executor_id, stars, body.get("text") or "", now_iso()),
+                )
+                notify_user(
+                    executor_id,
+                    f"Новый отзыв по заказу #{order_id}: {stars}★.",
+                    "executor",
+                    order_id,
+                    "profileView",
+                )
                 self.send_json({"ok": True})
                 return
 
@@ -861,11 +1247,36 @@ class ApiHandler(BaseHTTPRequestHandler):
                 if not order:
                     self.send_error_json(404, "Order not found")
                     return
+                if not order["customer_id"] or not order["executor_id"]:
+                    self.send_error_json(400, "Both chat participants must be selected")
+                    return
                 sender_id = user_id
-                receiver_id = order["selected_executor_id"] if sender_id == order["customer_id"] else order["customer_id"]
+                if sender_id not in {order["customer_id"], order["executor_id"]}:
+                    self.send_error_json(403, "Chat is available only to order participants")
+                    return
+                receiver_id = chat_peer_id(sender_id, order)
                 if not receiver_id:
-                    receiver_id = order["customer_id"]
+                    self.send_error_json(400, "Second chat participant is not selected yet")
+                    return
+                if sender_id == receiver_id:
+                    self.send_error_json(400, "Second chat participant is not selected yet")
+                    return
                 message_id = db_execute(
+                    """
+                    INSERT INTO messages(order_id, from_user_id, to_user_id, text, file_id, file_type, created_at)
+                    VALUES(?,?,?,?,?,?,?)
+                    """,
+                    (
+                        int(body["order_id"]),
+                        sender_id,
+                        int(receiver_id),
+                        body.get("text") or "",
+                        body.get("file_id") or body.get("photo_id") or "",
+                        body.get("file_type") or "",
+                        now_iso(),
+                    ),
+                )
+                db_execute(
                     """
                     INSERT INTO chat_messages(order_id, sender_id, receiver_id, text, file_id, file_type, created_at)
                     VALUES(?,?,?,?,?,?,?)
@@ -879,6 +1290,13 @@ class ApiHandler(BaseHTTPRequestHandler):
                         body.get("file_type") or "",
                         now_iso(),
                     ),
+                )
+                notify_user(
+                    receiver_id,
+                    f"Новое сообщение по заказу #{order['id']}.",
+                    "executor" if receiver_id in {order["selected_executor_id"], order["executor_id"]} else "customer",
+                    order["id"],
+                    "chatView",
                 )
                 self.send_json({"ok": True, "message_id": message_id})
                 return
@@ -906,10 +1324,16 @@ class ApiHandler(BaseHTTPRequestHandler):
                 portfolio_id = int_param(query, "portfolio_id")
                 if not portfolio_id:
                     portfolio_id = int_param(query, "id")
+                item = db_one("SELECT file_id, created_at FROM portfolio WHERE id=? AND user_id=?", (portfolio_id, user_id))
                 db_execute(
-                    "DELETE FROM portfolio_files WHERE id=? AND executor_id=?",
+                    "DELETE FROM portfolio WHERE id=? AND user_id=?",
                     (portfolio_id, user_id),
                 )
+                if item:
+                    db_execute(
+                        "DELETE FROM portfolio_files WHERE executor_id=? AND file_id=? AND created_at=?",
+                        (user_id, item["file_id"], item["created_at"]),
+                    )
                 self.send_json({"ok": True})
                 return
             self.send_error_json(404, "Not found")
@@ -957,6 +1381,14 @@ class ApiHandler(BaseHTTPRequestHandler):
             self.wfile.write(raw)
         except BrokenPipeError:
             logging.info("Client disconnected during binary response, ignoring broken pipe")
+
+    def send_redirect(self, location):
+        self.send_response(302)
+        self.send_header("Location", location)
+        self.send_header("Content-Length", "0")
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Connection", "keep-alive")
+        self.end_headers()
 
     def send_error_json(self, status, message):
         self.send_json({"ok": False, "error": message}, status)

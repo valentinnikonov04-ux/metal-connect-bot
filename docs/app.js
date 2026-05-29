@@ -297,7 +297,6 @@ function renderRoleLocked() {
   $$(".view").forEach(function (section) { section.classList.remove("active"); });
   $("#homeView").classList.add("active");
   $("#homeGrid").innerHTML = "";
-  if ($("#bottomNav")) $("#bottomNav").innerHTML = "";
 }
 
 function renderSkeleton() {
@@ -309,12 +308,6 @@ function renderSkeleton() {
 
 function renderTabs() {
   if (!isAllowedView(state.view)) state.view = "homeView";
-  var nav = $("#bottomNav");
-  if (!nav) return;
-  var items = bottomNavItems();
-  nav.innerHTML = items.map(function (item) {
-    return '<button class="nav-item ' + (state.view === item[0] ? "active" : "") + '" data-go="' + h(item[0]) + '" type="button"><span>' + h(item[2]) + '</span><b>' + h(item[1]) + '</b></button>';
-  }).join("");
 }
 
 function setView(view) {
@@ -332,28 +325,6 @@ function setView(view) {
 
 function isAllowedView(view) {
   return (roleTabs[state.role] || []).some(function (item) { return item[0] === view; });
-}
-
-function bottomNavItems() {
-  if (state.role === "executor") {
-    return [
-      ["dashboardView", "Главная", "⌂"],
-      ["marketView", "Заказы", "⌕"],
-      ["ordersView", "Заявки", "□"],
-      ["chatView", "Чат", "◌"],
-      ["homeView", "Еще", "≡"]
-    ];
-  }
-  if (state.role === "customer") {
-    return [
-      ["dashboardView", "Главная", "⌂"],
-      ["builderView", "Заказ", "+"],
-      ["ordersView", "Мои", "□"],
-      ["offersView", "Отклики", "◌"],
-      ["homeView", "Еще", "≡"]
-    ];
-  }
-  return [];
 }
 
 function renderAll() {
@@ -592,7 +563,7 @@ async function publishOrder() {
     setButtonLoading(button, true, "Публикую...");
     if ($("#orderFiles").files && $("#orderFiles").files[0]) {
       payload.file_id = await imageFileToDataUrl($("#orderFiles").files[0], 1280, 0.72);
-      payload.file_type = "image_data";
+      payload.file_type = dataUrlFileType(payload.file_id);
     }
     if (API_BASE) await apiPost("/api/orders/create", payload);
     else if (tg && tg.sendData) tg.sendData(JSON.stringify(payload));
@@ -645,8 +616,9 @@ function orderRow(order) {
         return '<span class="tag">' + h(offer.executor_company || "Исполнитель") + ': ' + h(offer.price || "цена не указана") + '</span>';
       }).join("") + '</div>'
     : "";
-  var canChat = order.executor_id || order.selected_executor_id || order.status === "in_progress" || order.status === "completed";
+  var canChat = !!order.executor_id;
   var chatButton = '<button class="ghost" data-action="' + (canChat ? "select-chat" : "chat-unavailable") + '" data-order="' + h(order.id) + '" type="button">💬 Чат</button>';
+  var fileButton = orderFileButton(order);
   var editButton = order.status === "open" ? '<button class="ghost" data-action="edit-order" data-order="' + h(order.id) + '" type="button">Редактировать</button>' : "";
   var cancelButton = order.status === "open" || order.status === "in_progress" ? '<button class="ghost" data-action="cancel-order" data-order="' + h(order.id) + '" type="button">Отменить</button>' : "";
   var completeButton = order.status === "in_progress" ? '<button class="ghost" data-action="complete-order" data-order="' + h(order.id) + '" type="button">Завершить</button>' : "";
@@ -655,16 +627,19 @@ function orderRow(order) {
     '<div class="card-head"><div><h3>#' + h(order.id) + ' ' + h(order.title) + '</h3><p>' + h(order.budget || "бюджет не указан") + ' · срок до ' + h(order.deadline || "не указан") + '</p></div><span class="status ' + statusClass(order.status) + '">' + h(statusLabel(order.status)) + '</span></div>' +
     '<div class="tags"><span class="tag">' + h(order.material || "Материал не указан") + '</span><span class="tag">' + h(order.quantity || 0) + ' шт.</span><span class="tag">Предложений: ' + h(order.offers_count || 0) + '</span></div>' +
     offersPreview +
-    '<div class="card-actions"><button class="primary small" data-action="view-offers" data-order="' + h(order.id) + '" type="button">Смотреть предложения</button>' + chatButton + editButton + cancelButton + completeButton + '</div></article>';
+    '<div class="card-actions"><button class="primary small" data-action="view-offers" data-order="' + h(order.id) + '" type="button">Смотреть предложения</button>' + fileButton + chatButton + editButton + cancelButton + completeButton + '</div></article>';
 }
 
 function offerRow(offer) {
+  var order = offerToOrder(offer);
+  var fileButton = orderFileButton(order);
   var chatButton = offer.status === "accepted"
     ? '<button class="ghost" data-action="select-chat" data-order="' + h(offer.order_id) + '" type="button">💬 Написать заказчику</button>'
     : (offer.status === "declined" ? '<button class="primary small" data-action="open-offer" data-order="' + h(offer.order_id) + '" type="button">Сделать новое предложение</button>' : "");
   return '<article class="order-card">' +
+    drawingPreview(order) +
     '<div class="card-head"><div><h3>#' + h(offer.order_id) + ' ' + h(offer.order_title || "Заказ") + '</h3><p>' + h(offer.city || "") + ' · ' + h(offer.price || "цена не указана") + '</p></div><span class="status ' + statusClass(offer.status) + '">' + h(offerStatus(offer.status)) + '</span></div>' +
-    '<p>' + h(offer.comment || "") + '</p><div class="card-actions">' + chatButton + '</div></article>';
+    '<p>' + h(offer.comment || "") + '</p><div class="card-actions">' + fileButton + chatButton + '</div></article>';
 }
 
 function renderMarket() {
@@ -710,7 +685,7 @@ function renderOpenOrders() {
     return '<article class="entity-card order-search-card">' + drawingPreview(order) +
       '<div class="card-head"><div><h3>#' + h(order.id) + ' ' + h(order.title) + '</h3><p>' + h(order.customer_name || "Заказчик") + ' · ' + h(order.city || "") + ' · до ' + h(order.deadline || "") + '</p></div><span class="badge neutral">' + h(order.material || "") + '</span></div>' +
       '<div class="tags"><span class="tag">' + h(order.quantity || 0) + ' шт.</span><span class="tag">срочность: ' + h(order.urgency || "не указана") + '</span><span class="tag">' + h(order.budget || "бюджет не указан") + '</span></div>' +
-      '<div class="card-actions">' + offerButton + '</div></article>';
+      '<div class="card-actions">' + orderFileButton(order) + offerButton + '</div></article>';
   }).join("") || emptyPanel("Открытых заказов нет", "Подходящих заказов по фильтрам не найдено.");
   if (state.pagination.openOrders.hasMore) {
     html += '<div class="pager"><button class="ghost" data-action="load-more-open-orders" type="button">Загрузить еще 20</button></div>';
@@ -780,7 +755,7 @@ function renderChat() {
   var order = findOrder(state.selectedOrderId);
   var acceptedExecutor = String(order && (order.executor_id || order.selected_executor_id || "")) === String(state.user.id);
   var acceptedOffer = order && order.offer_status === "accepted";
-  var chatReady = !!order && (state.role === "executor" ? (acceptedExecutor || acceptedOffer) : (order.executor_id || order.selected_executor_id || order.status === "in_progress"));
+  var chatReady = !!order && !!order.executor_id && (state.role === "executor" ? (acceptedExecutor || acceptedOffer) : String(order.customer_id || state.user.id) === String(state.user.id));
   $("#chatOrderId").textContent = order ? "#" + order.id : "Заказ";
   $("#chatOrderTitle").textContent = order ? order.title : "Не выбран";
   $("#chatOrderMeta").textContent = order ? [order.city, order.quantity ? order.quantity + " шт." : "", order.budget].filter(Boolean).join(" · ") : "Откройте чат из карточки заказа";
@@ -835,12 +810,21 @@ function chatOrders() {
         title: offer.order_title || "Заказ",
         city: offer.city || "",
         budget: offer.budget || offer.price || "",
-        offer_status: offer.status
+        customer_id: offer.customer_id || "",
+        executor_id: offer.status === "accepted" ? (offer.executor_id || offer.selected_executor_id || state.user.id) : (offer.selected_executor_id || ""),
+        selected_executor_id: offer.selected_executor_id || "",
+        offer_status: offer.status,
+        file_url: offer.file_url || "",
+        has_file: offer.has_file,
+        file_id: offer.file_id || "",
+        photo_id: offer.photo_id || "",
+        file_preview: offer.file_preview || "",
+        file_type: offer.file_type || ""
       };
     });
   }
   return (state.data.orders || []).filter(function (order) {
-    return order.executor_id || order.selected_executor_id || order.status === "in_progress" || order.status === "completed";
+    return order.executor_id;
   });
 }
 
@@ -995,6 +979,7 @@ function initEvents() {
     $("#offerComment").value = "Готов рассчитать после уточнения чертежа и материала.";
   });
   $("#portfolioAddBtn").addEventListener("click", addPortfolio);
+  $("#portfolioPhoto").addEventListener("change", updatePortfolioPhotoLabel);
   $("#chatForm").addEventListener("submit", sendChatMessage);
   $("#chatPhoto").addEventListener("change", uploadChatPhoto);
   $("#attachBtn").addEventListener("click", function () {
@@ -1075,6 +1060,7 @@ async function handleActionClick(event) {
   if (action === "save-profile") await saveProfile();
   if (action === "remove-portfolio") await actionDelete("/api/portfolio?portfolio_id=" + encodeURIComponent(button.dataset.item));
   if (action === "choose-portfolio-photo") $("#portfolioPhoto").click();
+  if (action === "open-order-file") openOrderFile(button.dataset.order);
   if (action === "stats-period") await setStatsPeriod(button.dataset.period);
   if (action === "load-more-orders") await loadMoreCustomerOrders(button);
   if (action === "load-more-open-orders") await loadMoreOpenOrders(button);
@@ -1082,31 +1068,46 @@ async function handleActionClick(event) {
 
 async function addPortfolio() {
   var button = $("#portfolioAddBtn");
-  var fileId = $("#portfolioFileId").value.trim();
   var text = $("#portfolioText").value.trim();
   var fileInput = $("#portfolioPhoto");
   var equipment = $("#portfolioEquipment") ? $("#portfolioEquipment").value.trim() : "";
   if (!text) {
-    showToast("Заполните описание работы, оборудование или станок.");
+    showToast("Заполните описание работы.");
     return;
   }
-  if (!fileId && fileInput && fileInput.files && fileInput.files[0]) {
-    fileId = await imageFileToDataUrl(fileInput.files[0], 1280, 0.72);
-  }
-  if (!fileId) {
-    showToast("Добавьте фото или укажите file_id.");
+  if (!fileInput || !fileInput.files || !fileInput.files[0]) {
+    showToast("Выберите фото работы.");
     return;
   }
   try {
-    setButtonLoading(button, true, "Добавляю...");
-    await actionPost("/api/portfolio/add", { file_id: fileId, description: text, text: text, equipment: equipment, file_type: fileId.indexOf("data:image/") === 0 ? "image_data" : "photo" });
-    $("#portfolioFileId").value = "";
+    setButtonLoading(button, true, "Сохраняю...");
+    var fileId = await imageFileToDataUrl(fileInput.files[0], 1280, 0.72);
+    await apiPost("/api/portfolio/add", {
+      file_id: fileId,
+      description: text,
+      text: text,
+      equipment: equipment,
+      file_type: dataUrlFileType(fileId)
+    });
     $("#portfolioText").value = "";
     if ($("#portfolioEquipment")) $("#portfolioEquipment").value = "";
     if (fileInput) fileInput.value = "";
+    updatePortfolioPhotoLabel();
+    await refreshAfterMutation("/api/portfolio");
+    showToast("Работа сохранена.");
+  } catch (error) {
+    showToast("Не удалось сохранить работу: " + error.message);
   } finally {
     setButtonLoading(button, false);
   }
+}
+
+function updatePortfolioPhotoLabel() {
+  var label = $("#portfolioPhotoName");
+  var input = $("#portfolioPhoto");
+  if (!label || !input) return;
+  var file = input.files && input.files[0];
+  label.textContent = file ? file.name : "Фото не выбрано";
 }
 
 async function actionPost(path, body) {
@@ -1216,7 +1217,7 @@ function calendarDateKey(date, day) {
 
 function drawingPreview(order) {
   var fileId = order.file_id || order.photo_id || order.file_preview || "";
-  if (order.file_url) return '<div class="drawing-preview">' + filePreview(API_BASE + order.file_url + withUserId("").replace("?", "&"), order.file_type, true) + '</div>';
+  if (order.file_url) return '<div class="drawing-preview">' + filePreview(orderFileUrl(order), order.file_type, isImageFile(order.file_type, order.file_url)) + '</div>';
   if (!fileId) return '<div class="drawing-preview"><span>' + h(order.has_file ? "чертеж прикреплен" : "чертеж не прикреплен") + '</span></div>';
   return '<div class="drawing-preview">' + filePreview(fileId, order.file_type, false) + '</div>';
 }
@@ -1230,6 +1231,54 @@ function filePreview(fileId, fileType, forceImage) {
 
 function messagePreview(fileId, fileType) {
   return '<div class="message-file">' + filePreview(fileId, fileType) + '</div>';
+}
+
+function hasOrderFile(order) {
+  return !!(order && (order.has_file || order.file_url || order.file_id || order.photo_id || order.file_preview));
+}
+
+function orderFileButton(order) {
+  if (!hasOrderFile(order)) return "";
+  return '<button class="ghost" data-action="open-order-file" data-order="' + h(order.id) + '" type="button">📎 Чертеж</button>';
+}
+
+function orderFileUrl(order) {
+  if (!order) return "";
+  var fileId = order.file_id || order.photo_id || order.file_preview || "";
+  if (order.file_url) {
+    if (/^https?:\/\//.test(order.file_url)) return order.file_url;
+    return API_BASE + order.file_url + withUserId("").replace("?", "&");
+  }
+  if (String(fileId).indexOf("data:") === 0 || /^https?:\/\//.test(String(fileId))) return fileId;
+  return "";
+}
+
+function openOrderFile(orderId) {
+  var order = findOrder(orderId);
+  if (!hasOrderFile(order)) return;
+  var url = orderFileUrl(order);
+  if (!url) {
+    showToast("Чертеж хранится в Telegram. Откройте заказ в боте, чтобы получить файл.");
+    return;
+  }
+  if (tg && tg.openLink && /^https?:\/\//.test(url)) {
+    tg.openLink(url);
+    return;
+  }
+  var opened = window.open(url, "_blank", "noopener");
+  if (!opened) window.location.href = url;
+}
+
+function isImageFile(fileType, value) {
+  var type = String(fileType || "").toLowerCase();
+  return type.indexOf("image") !== -1 || type === "photo" || String(value || "").indexOf("data:image/") === 0;
+}
+
+function dataUrlFileType(value) {
+  var text = String(value || "");
+  if (text.indexOf("data:image/") === 0) return "image_data";
+  if (text.indexOf("data:application/pdf") === 0) return "pdf";
+  return "file";
 }
 
 function readFileAsDataUrl(file) {
@@ -1523,12 +1572,28 @@ function findOrder(id) {
   if (order) return order;
   var offer = (state.data.offers || []).find(function (item) { return String(item.order_id) === String(id); });
   if (!offer) return null;
+  return offerToOrder(offer);
+}
+
+function offerToOrder(offer) {
   return {
     id: offer.order_id,
     title: offer.order_title || "Заказ",
     city: offer.city || "",
     budget: offer.budget || offer.price || "",
-    offer_status: offer.status
+    deadline: offer.order_deadline || offer.deadline || "",
+    material: offer.material || "",
+    quantity: offer.quantity || 0,
+    customer_id: offer.customer_id || "",
+    executor_id: offer.status === "accepted" ? (offer.executor_id || offer.selected_executor_id || state.user.id) : (offer.selected_executor_id || ""),
+    selected_executor_id: offer.selected_executor_id || "",
+    offer_status: offer.status,
+    file_url: offer.file_url || "",
+    has_file: offer.has_file,
+    file_id: offer.file_id || "",
+    photo_id: offer.photo_id || "",
+    file_preview: offer.file_preview || "",
+    file_type: offer.file_type || ""
   };
 }
 
@@ -1654,8 +1719,8 @@ function offerStatus(status) {
 }
 
 function statusClass(status) {
-  if (status === "completed" || status === "accepted") return "done";
-  if (status === "in_progress" || status === "pending") return "warn";
+  if (status === "completed") return "done";
+  if (status === "in_progress" || status === "pending" || status === "accepted") return "warn";
   if (status === "declined") return "bad";
   if (status === "cancelled") return "muted";
   return "";
