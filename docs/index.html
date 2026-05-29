@@ -3,28 +3,31 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta http-equiv="Cache-Control" content="no-store, max-age=0">
+  <meta http-equiv="Pragma" content="no-cache">
   <title>METAL CONNECT</title>
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <script>
     window.DEFAULT_API_URL = "https://womanless-bunion-concave.ngrok-free.dev";
   </script>
-  <link href="styles.css" rel="stylesheet">
+  <link href="styles.css?v=20260529-final-cleanup-2" rel="stylesheet">
 </head>
 <body>
-  <button class="test-button" onclick="alert('Test works')" type="button">Тест</button>
   <main class="app-shell">
     <header class="topbar">
       <div>
         <p class="eyebrow">METAL CONNECT</p>
         <h1 id="welcomeTitle">Рабочий кабинет</h1>
       </div>
+      <div class="user-avatar" id="userAvatar" aria-hidden="true"></div>
       <span class="role-pill" id="rolePill">Роль не выбрана</span>
-      <button class="icon-btn" id="supportBtn" type="button" aria-label="Поддержка">?</button>
     </header>
 
-    <nav class="tabs" id="tabs" aria-label="Разделы"></nav>
+    <section class="view active" id="homeView">
+      <section class="home-grid" id="homeGrid"></section>
+    </section>
 
-    <section class="view active" id="dashboardView">
+    <section class="view" id="dashboardView">
       <section class="hero">
         <div>
           <p class="eyebrow" id="roleEyebrow">Кабинет заказчика</p>
@@ -74,15 +77,15 @@
             <label class="wide">Описание работ
               <textarea id="orderDescription" rows="4" placeholder="Например: токарная обработка по чертежу, материал 40Х, нужна упаковка и доставка до ТК."></textarea>
             </label>
-            <fieldset class="wide">
-              <legend>Материал</legend>
-              <div class="material-grid" id="materialGrid">
-                <button class="material active" data-material="Сталь" type="button">⚙️<span>Сталь</span></button>
-                <button class="material" data-material="Алюминий" type="button">✈️<span>Алюминий</span></button>
-                <button class="material" data-material="Титан" type="button">🔩<span>Титан</span></button>
-                <button class="material" data-material="Пластик" type="button">🧴<span>Пластик</span></button>
-              </div>
-            </fieldset>
+            <label class="wide">Материал
+              <select id="orderMaterial">
+                <option value="Сталь">Сталь</option>
+                <option value="Алюминий">Алюминий</option>
+                <option value="Титан">Титан</option>
+                <option value="Пластик">Пластик</option>
+                <option value="Другой">Другой</option>
+              </select>
+            </label>
             <label>Количество деталей
               <input id="orderQty" type="number" inputmode="numeric" min="1" step="1" placeholder="120">
             </label>
@@ -110,7 +113,7 @@
             <label class="file-zone wide">
               <input id="orderFiles" type="file" multiple accept="image/*,.pdf">
               <span>Загрузить фото/чертежи до 5 шт.</span>
-              <small id="fileHint">Файлы будут прикреплены к заказу после подключения файлового API.</small>
+              <small id="fileHint">Первый файл будет прикреплен к заказу при публикации.</small>
             </label>
           </div>
         </article>
@@ -210,6 +213,9 @@
             <h2 id="chatTitle">Чат по заказу</h2>
             <p id="chatMeta">Сообщения загружаются только по конкретному заказу.</p>
           </div>
+          <label class="chat-select">Заказ
+            <select id="chatOrderSelect"></select>
+          </label>
           <button class="ghost" id="attachBtn" type="button">📎 Фото</button>
         </header>
         <div class="messages" id="messages"></div>
@@ -231,34 +237,6 @@
         <p class="panel-copy">Занятые дни видны заказчику при выборе исполнителя и помогают честно обещать сроки.</p>
       </section>
       <section class="calendar-grid" id="calendarGrid"></section>
-    </section>
-
-    <section class="view" id="portfolioView">
-      <section class="panel">
-        <div class="panel-head">
-          <h2>Портфолио</h2>
-          <button class="ghost" id="sharePortfolioBtn" type="button">Поделиться</button>
-        </div>
-        <div class="form-grid">
-          <label>Фото работы
-            <input id="portfolioPhoto" class="file-input-hidden" type="file" accept="image/*">
-            <small>Можно выбрать фото с телефона или указать Telegram file_id ниже.</small>
-          </label>
-          <button class="ghost wide" data-action="choose-portfolio-photo" type="button">Добавить фото</button>
-          <label>Telegram file_id
-            <input id="portfolioFileId" type="text" placeholder="Необязательно">
-          </label>
-          <label>Описание работы / оборудование
-            <input id="portfolioText" type="text" placeholder="Фрезеровка корпуса, станок Haas VF-2">
-          </label>
-          <label>Оборудование / станки
-            <input id="portfolioEquipment" type="text" placeholder="Haas VF-2, Fanuc, лазер 3 кВт">
-          </label>
-          <button class="primary wide" id="portfolioAddBtn" type="button">➕ Добавить в портфолио</button>
-        </div>
-      </section>
-      <section class="portfolio-grid" id="portfolioGrid"></section>
-      <section class="cards-list" id="reviewsList"></section>
     </section>
 
     <section class="view" id="statsView">
@@ -299,21 +277,47 @@
         <article class="panel">
           <h2>Уведомления</h2>
           <div class="settings-list">
-            <label class="check-row"><input type="checkbox" checked><span>Новые предложения</span></label>
-            <label class="check-row"><input type="checkbox" checked><span>Сообщения в чате</span></label>
-            <label class="check-row"><input type="checkbox"><span>Финансы и тарифы</span></label>
+            <label class="check-row"><input data-setting="notify_offers" type="checkbox" checked><span>Новые предложения</span></label>
+            <label class="check-row"><input data-setting="notify_chat" type="checkbox" checked><span>Сообщения в чате</span></label>
+            <label class="check-row"><input data-setting="notify_finance" type="checkbox"><span>Финансы и тарифы</span></label>
             <label>Тихий час
-              <select>
-                <option>22:00 - 09:00</option>
-                <option>23:00 - 08:00</option>
-                <option>Выключен</option>
+              <select data-setting="quiet_hours">
+                <option value="22:00 - 09:00">22:00 - 09:00</option>
+                <option value="23:00 - 08:00">23:00 - 08:00</option>
+                <option value="off">Выключен</option>
               </select>
             </label>
           </div>
         </article>
       </section>
+      <section class="panel" id="portfolioPanel">
+        <div class="panel-head">
+          <h2>Портфолио</h2>
+        </div>
+        <div class="form-grid">
+          <label>Фото работы
+            <input id="portfolioPhoto" class="file-input-hidden" type="file" accept="image/*">
+            <small>Можно выбрать фото с телефона или указать Telegram file_id ниже.</small>
+          </label>
+          <button class="ghost wide" data-action="choose-portfolio-photo" type="button">Добавить фото</button>
+          <label>Telegram file_id
+            <input id="portfolioFileId" type="text" placeholder="Необязательно">
+          </label>
+          <label>Описание работы
+            <input id="portfolioText" type="text" placeholder="Фрезеровка корпуса, партия 40 шт.">
+          </label>
+          <label>Оборудование / станки
+            <input id="portfolioEquipment" type="text" placeholder="Haas VF-2, Fanuc, лазер 3 кВт">
+          </label>
+          <button class="primary wide" id="portfolioAddBtn" type="button">➕ Добавить в портфолио</button>
+        </div>
+      </section>
+      <section class="portfolio-grid" id="portfolioGrid"></section>
+      <section class="cards-list" id="reviewsList"></section>
     </section>
   </main>
+
+  <nav class="bottom-nav" id="bottomNav" aria-label="Основная навигация"></nav>
 
   <aside class="api-tools" id="apiTools" aria-live="polite">
     <div class="api-error" id="apiMissingPanel" hidden>
@@ -323,7 +327,6 @@
         <button class="primary small" id="manualApiSaveBtn" type="button">Ввести URL вручную</button>
       </div>
     </div>
-    <button class="ghost small" id="checkApiBtn" type="button">Проверить API</button>
   </aside>
 
   <dialog class="offer-modal" id="offerModal">
@@ -370,6 +373,6 @@
     </form>
   </dialog>
 
-  <script src="app.js"></script>
+  <script src="app.js?v=20260529-final-cleanup-2"></script>
 </body>
 </html>

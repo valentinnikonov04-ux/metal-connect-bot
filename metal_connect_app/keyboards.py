@@ -1,4 +1,5 @@
 from typing import Optional
+from pathlib import Path
 from urllib.parse import urlencode
 
 from aiogram.types import (
@@ -6,48 +7,52 @@ from aiogram.types import (
     InlineKeyboardMarkup,
     KeyboardButton,
     ReplyKeyboardMarkup,
-    WebAppInfo,
 )
 
 from metal_connect_app.config import API_URL, WEBAPP_URL
 
+NGROK_URL_PATH = Path(".ngrok_url")
+WEBAPP_BUILD = "20260529-final-cleanup-2"
 
-def webapp_url(role: Optional[str] = None) -> str:
+
+def public_api_url() -> str:
+    if API_URL:
+        return API_URL.rstrip("/")
+    if NGROK_URL_PATH.exists():
+        return NGROK_URL_PATH.read_text(encoding="utf-8").strip().rstrip("/")
+    return ""
+
+
+def webapp_url(role: Optional[str] = None, user_id: Optional[int] = None) -> str:
     if not WEBAPP_URL:
         return ""
-    query = {}
+    query = {"app_v": WEBAPP_BUILD}
     if role in {"customer", "executor"}:
         query["role"] = role
-    if API_URL:
-        query["api"] = API_URL
+    if user_id:
+        query["user_id"] = str(user_id)
+    api_url = public_api_url()
+    if api_url:
+        query["api"] = api_url
     if not query:
         return WEBAPP_URL
     separator = "&" if "?" in WEBAPP_URL else "?"
     return f"{WEBAPP_URL}{separator}{urlencode(query)}"
 
 
-def mini_app_button(role: Optional[str] = None) -> KeyboardButton:
-    if WEBAPP_URL:
-        return KeyboardButton(text="Открыть кабинет", web_app=WebAppInfo(url=webapp_url(role)))
-    return KeyboardButton(text="Открыть кабинет")
-
-
-def main_keyboard(role: Optional[str] = None) -> ReplyKeyboardMarkup:
+def main_keyboard(role: Optional[str] = None, user_id: Optional[int] = None) -> ReplyKeyboardMarkup:
     if role == "customer":
         keyboard = [
-            [mini_app_button(role)],
             [KeyboardButton(text="Мой профиль"), KeyboardButton(text="Мои заказы")],
             [KeyboardButton(text="Создать заказ"), KeyboardButton(text="Написать в поддержку")],
         ]
     elif role == "executor":
         keyboard = [
-            [mini_app_button(role)],
             [KeyboardButton(text="Новые/актуальные заказы"), KeyboardButton(text="Мой профиль")],
             [KeyboardButton(text="Мои отклики/мои предложения"), KeyboardButton(text="Написать в поддержку")],
         ]
     else:
         keyboard = [
-            [mini_app_button(role)],
             [KeyboardButton(text="Меню"), KeyboardButton(text="Профиль")],
             [KeyboardButton(text="Написать в поддержку")],
         ]
@@ -59,10 +64,8 @@ def main_keyboard(role: Optional[str] = None) -> ReplyKeyboardMarkup:
     )
 
 
-def inline_menu(role: Optional[str] = None, is_admin: bool = False) -> InlineKeyboardMarkup:
+def inline_menu(role: Optional[str] = None, is_admin: bool = False, user_id: Optional[int] = None) -> InlineKeyboardMarkup:
     rows = []
-    if WEBAPP_URL:
-        rows.append([InlineKeyboardButton(text="Открыть кабинет", web_app=WebAppInfo(url=webapp_url(role)))])
     if role == "customer":
         rows.extend(
             [
