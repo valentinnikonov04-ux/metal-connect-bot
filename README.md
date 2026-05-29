@@ -4,6 +4,16 @@ Telegram bot and Mini App for direct metalworking orders between customers and p
 
 ## Local Bot Run
 
+### One-command dev run
+
+This starts DB migration, API, ngrok, writes the current ngrok URL to `.env`, updates the API runtime URL, and starts the bot in one terminal:
+
+```bash
+./scripts/run_all.sh
+```
+
+Stop everything with `Ctrl+C`.
+
 1. Copy environment example:
 
 ```bash

@@ -26,7 +26,7 @@ var REQUEST_TIMEOUT_MS = 60000;
 var state = {
   role: normalizeRole(params.get("role") || safeGet("mc_role", "")),
   user: telegramUser(),
-  view: params.get("view") || safeGet("mc_view", "") || "dashboardView",
+  view: params.get("view") || "dashboardView",
   orderTab: "open",
   statsPeriod: "month",
   material: "Сталь",
@@ -297,6 +297,7 @@ function renderRoleLocked() {
   $$(".view").forEach(function (section) { section.classList.remove("active"); });
   $("#homeView").classList.add("active");
   $("#homeGrid").innerHTML = "";
+  if ($("#bottomNav")) $("#bottomNav").innerHTML = "";
 }
 
 function renderSkeleton() {
@@ -308,6 +309,12 @@ function renderSkeleton() {
 
 function renderTabs() {
   if (!isAllowedView(state.view)) state.view = "homeView";
+  var nav = $("#bottomNav");
+  if (!nav) return;
+  var items = bottomNavItems();
+  nav.innerHTML = items.map(function (item) {
+    return '<button class="nav-item ' + (state.view === item[0] ? "active" : "") + '" data-go="' + h(item[0]) + '" type="button"><span aria-hidden="true">' + h(item[2]) + '</span><b>' + h(item[1]) + '</b></button>';
+  }).join("");
 }
 
 function setView(view) {
@@ -325,6 +332,28 @@ function setView(view) {
 
 function isAllowedView(view) {
   return (roleTabs[state.role] || []).some(function (item) { return item[0] === view; });
+}
+
+function bottomNavItems() {
+  if (state.role === "executor") {
+    return [
+      ["dashboardView", "Главная", "⌂"],
+      ["marketView", "Поиск", "⌕"],
+      ["ordersView", "Предложения", "◆"],
+      ["chatView", "Чат", "◼"],
+      ["profileView", "Профиль", "●"]
+    ];
+  }
+  if (state.role === "customer") {
+    return [
+      ["dashboardView", "Главная", "⌂"],
+      ["ordersView", "Заказы", "◆"],
+      ["offersView", "Предложения", "◼"],
+      ["chatView", "Чат", "▰"],
+      ["profileView", "Профиль", "●"]
+    ];
+  }
+  return [];
 }
 
 function renderAll() {
