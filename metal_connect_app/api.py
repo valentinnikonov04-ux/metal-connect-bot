@@ -428,7 +428,7 @@ def open_orders(limit=20, offset=0):
 
 
 def can_access_order_chat(user_id, order):
-    executor_id = order["executor_id"] if order else 0
+    executor_id = (order["executor_id"] or order["selected_executor_id"]) if order else 0
     return bool(
         order
         and user_id
@@ -439,7 +439,7 @@ def can_access_order_chat(user_id, order):
 
 
 def chat_peer_id(sender_id, order):
-    selected_executor_id = order["executor_id"]
+    selected_executor_id = order["executor_id"] or order["selected_executor_id"]
     if sender_id == order["customer_id"]:
         return selected_executor_id
     if sender_id == selected_executor_id:
@@ -548,7 +548,7 @@ def calendar(user_id):
 def messages_for(user_id, order_id=0):
     if not order_id:
         return []
-    params = [user_id, user_id, user_id, user_id, order_id]
+    params = [user_id, user_id, user_id, user_id, user_id, order_id]
     return rows_dict(
         db_all(
             """
@@ -559,6 +559,7 @@ def messages_for(user_id, order_id=0):
             JOIN orders ON orders.id=messages.order_id
             WHERE (orders.customer_id=?
                OR orders.selected_executor_id=?
+               OR orders.executor_id=?
                OR messages.from_user_id=?
                OR messages.to_user_id=?)
               AND messages.order_id=?
@@ -1247,11 +1248,12 @@ class ApiHandler(BaseHTTPRequestHandler):
                 if not order:
                     self.send_error_json(404, "Order not found")
                     return
-                if not order["customer_id"] or not order["executor_id"]:
+                executor_id = order["executor_id"] or order["selected_executor_id"]
+                if not order["customer_id"] or not executor_id:
                     self.send_error_json(400, "Both chat participants must be selected")
                     return
                 sender_id = user_id
-                if sender_id not in {order["customer_id"], order["executor_id"]}:
+                if sender_id not in {order["customer_id"], executor_id}:
                     self.send_error_json(403, "Chat is available only to order participants")
                     return
                 receiver_id = chat_peer_id(sender_id, order)

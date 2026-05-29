@@ -10,7 +10,7 @@
   <script>
     window.DEFAULT_API_URL = "https://womanless-bunion-concave.ngrok-free.dev";
   </script>
-  <link href="styles.css?v=20260529-metal-pro-3" rel="stylesheet">
+  <link href="styles.css?v=20260529-metal-pro-4" rel="stylesheet">
 </head>
 <body>
   <main class="app-shell">
@@ -19,15 +19,13 @@
         <p class="eyebrow">METAL CONNECT</p>
         <h1 id="welcomeTitle">Рабочий кабинет</h1>
       </div>
-      <div class="user-avatar" id="userAvatar" aria-hidden="true"></div>
-      <span class="role-pill" id="rolePill">Роль не выбрана</span>
+      <div class="topbar-actions">
+        <div class="user-avatar" id="userAvatar" aria-hidden="true"></div>
+        <button class="burger-btn" id="menuToggle" type="button" aria-label="Открыть меню" aria-expanded="false">☰</button>
+      </div>
     </header>
 
-    <section class="view active" id="homeView">
-      <section class="home-grid" id="homeGrid"></section>
-    </section>
-
-    <section class="view" id="dashboardView">
+    <section class="view active" id="dashboardView">
       <section class="hero">
         <div>
           <p class="eyebrow" id="roleEyebrow">Кабинет заказчика</p>
@@ -316,6 +314,15 @@
 
   <nav class="bottom-nav" id="bottomNav" aria-label="Основная навигация"></nav>
 
+  <div class="menu-backdrop" id="menuBackdrop" hidden></div>
+  <aside class="side-menu" id="sideMenu" aria-label="Разделы" aria-hidden="true">
+    <div class="side-menu-head">
+      <p class="eyebrow">Разделы</p>
+      <button class="icon-btn" id="menuClose" type="button" aria-label="Закрыть">×</button>
+    </div>
+    <nav class="side-menu-list" id="sideMenuList"></nav>
+  </aside>
+
   <aside class="api-tools" id="apiTools" aria-live="polite">
     <div class="api-error" id="apiMissingPanel" hidden>
       <strong>API не найден. Передайте ?api=URL</strong>
@@ -370,6 +377,6 @@
     </form>
   </dialog>
 
-  <script src="app.js?v=20260529-metal-pro-3"></script>
+  <script src="app.js?v=20260529-metal-pro-4"></script>
 </body>
 </html>

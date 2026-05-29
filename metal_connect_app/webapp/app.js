@@ -33,6 +33,7 @@ var state = {
   selectedOrderId: params.get("order_id") || null,
   offerFilterOrderId: params.get("order_id") || null,
   pendingCalendarDay: null,
+  menuOpen: false,
   data: emptyData(),
   apiReady: false,
   pagination: {
@@ -46,7 +47,6 @@ var state = {
 API_BASE = resolveApiUrl();
 var roleTabs = {
   customer: [
-    ["homeView", "Меню"],
     ["dashboardView", "Главная"],
     ["builderView", "Новый заказ"],
     ["ordersView", "Мои заказы"],
@@ -57,7 +57,6 @@ var roleTabs = {
     ["profileView", "Профиль"]
   ],
   executor: [
-    ["homeView", "Меню"],
     ["dashboardView", "Главная"],
     ["marketView", "Поиск заказов"],
     ["ordersView", "Мои предложения"],
@@ -293,22 +292,21 @@ function normalizeData(data) {
 
 function renderRoleLocked() {
   $("#welcomeTitle").textContent = "Роль не выбрана";
-  $("#rolePill").textContent = "Откройте из бота";
   $$(".view").forEach(function (section) { section.classList.remove("active"); });
-  $("#homeView").classList.add("active");
-  $("#homeGrid").innerHTML = "";
+  $("#dashboardView").classList.add("active");
   if ($("#bottomNav")) $("#bottomNav").innerHTML = "";
+  renderSideMenu();
 }
 
 function renderSkeleton() {
   $("#welcomeTitle").textContent = state.role === "executor" ? "Кабинет исполнителя" : "Кабинет заказчика";
-  $("#rolePill").textContent = state.role === "executor" ? "Исполнитель" : "Заказчик";
   renderUserAvatar();
   renderTabs();
+  renderSideMenu();
 }
 
 function renderTabs() {
-  if (!isAllowedView(state.view)) state.view = "homeView";
+  if (!isAllowedView(state.view)) state.view = "dashboardView";
   var nav = $("#bottomNav");
   if (!nav) return;
   var items = bottomNavItems();
@@ -318,14 +316,15 @@ function renderTabs() {
 }
 
 function setView(view) {
-  if (!isAllowedView(view)) view = "homeView";
+  if (!isAllowedView(view)) view = "dashboardView";
   state.view = view;
   safeSet("mc_view", view);
   $$(".view").forEach(function (section) {
     section.classList.toggle("active", section.id === view);
   });
   renderTabs();
-  renderBackButtons();
+  renderSideMenu();
+  closeMenu();
   renderCurrentView();
   updatePollingState();
 }
@@ -357,13 +356,11 @@ function bottomNavItems() {
 }
 
 function renderAll() {
-  renderHome();
   renderDashboard();
-  setView(state.view || "homeView");
+  setView(state.view || "dashboardView");
 }
 
 function renderCurrentView() {
-  if (state.view === "homeView") renderHome();
   if (state.view === "dashboardView") renderDashboard();
   if (state.view === "builderView") updatePreview();
   if (state.view === "ordersView") renderOrders();
@@ -376,49 +373,9 @@ function renderCurrentView() {
   if (state.view === "profileView") renderProfile();
 }
 
-function renderBackButtons() {
-  $$(".back-home-btn").forEach(function (button) { button.remove(); });
-  if (state.view === "homeView" || state.view === "dashboardView") return;
-  var section = $("#" + state.view);
-  if (!section) return;
-  var button = document.createElement("button");
-  button.className = "ghost back-home-btn";
-  button.type = "button";
-  button.dataset.go = "homeView";
-  button.textContent = "Все разделы";
-  section.insertBefore(button, section.firstChild);
-}
-
-function renderHome() {
-  var isExecutor = state.role === "executor";
-  var items = isExecutor ? [
-    ["📊", "Главная", "dashboardView"],
-    ["🔍", "Поиск заказов", "marketView"],
-    ["📄", "Мои предложения", "ordersView"],
-    ["📅", "Календарь", "calendarView"],
-    ["🔔", "Уведомления", "offersView"],
-    ["📈", "Статистика", "statsView"],
-    ["💬", "Чат", "chatView"],
-    ["👤", "Профиль", "profileView"]
-  ] : [
-    ["📊", "Главная", "dashboardView"],
-    ["➕", "Создать заказ", "builderView"],
-    ["📋", "Мои заказы", "ordersView"],
-    ["📩", "Предложения", "offersView"],
-    ["🔍", "Исполнители", "marketView"],
-    ["⭐", "Избранное", "favoritesView"],
-    ["💬", "Чат", "chatView"],
-    ["👤", "Профиль", "profileView"]
-  ];
-  $("#homeGrid").innerHTML = '<div class="home-intro"><p class="eyebrow">Разделы</p><h2>Все инструменты</h2></div>' + items.map(function (item) {
-    return '<button class="home-tile" data-go="' + h(item[2]) + '" type="button"><span>' + h(item[0]) + '</span><b>' + h(item[1]) + '</b></button>';
-  }).join("");
-}
-
 function renderDashboard() {
   var isExecutor = state.role === "executor";
   $("#welcomeTitle").textContent = isExecutor ? "Кабинет исполнителя" : "Кабинет заказчика";
-  $("#rolePill").textContent = isExecutor ? "Исполнитель" : "Заказчик";
   $("#roleEyebrow").textContent = isExecutor ? "Производство" : "Заказчик";
   var name = greetingName();
   $("#heroTitle").textContent = "Добрый день" + (name ? ", " + name : "") + "!";
@@ -443,6 +400,31 @@ function renderDashboard() {
   $("#dashboardMetrics").innerHTML = metrics.map(metricCard).join("");
   renderBars();
   renderFeed();
+}
+
+function renderSideMenu() {
+  var list = $("#sideMenuList");
+  if (!list) return;
+  var items = roleTabs[state.role] || [];
+  list.innerHTML = items.map(function (item) {
+    return '<button class="side-menu-item ' + (state.view === item[0] ? "active" : "") + '" data-go="' + h(item[0]) + '" type="button">' + h(item[1]) + '</button>';
+  }).join("") || '<div class="empty-inline"><span class="empty-icon">☰</span><p>Разделы появятся после выбора роли в боте.</p></div>';
+}
+
+function openMenu() {
+  state.menuOpen = true;
+  document.body.classList.add("menu-open");
+  if ($("#menuBackdrop")) $("#menuBackdrop").hidden = false;
+  if ($("#sideMenu")) $("#sideMenu").setAttribute("aria-hidden", "false");
+  if ($("#menuToggle")) $("#menuToggle").setAttribute("aria-expanded", "true");
+}
+
+function closeMenu() {
+  state.menuOpen = false;
+  document.body.classList.remove("menu-open");
+  if ($("#menuBackdrop")) $("#menuBackdrop").hidden = true;
+  if ($("#sideMenu")) $("#sideMenu").setAttribute("aria-hidden", "true");
+  if ($("#menuToggle")) $("#menuToggle").setAttribute("aria-expanded", "false");
 }
 
 function renderUserAvatar() {
@@ -646,14 +628,14 @@ function orderRow(order) {
       }).join("") + '</div>'
     : "";
   var canChat = !!order.executor_id;
-  var chatButton = '<button class="ghost" data-action="' + (canChat ? "select-chat" : "chat-unavailable") + '" data-order="' + h(order.id) + '" type="button">💬 Чат</button>';
+  var chatButton = '<button class="ghost" data-action="' + (canChat ? "select-chat" : "chat-unavailable") + '" data-order="' + h(order.id) + '" type="button"' + (canChat ? "" : " disabled") + '>💬 Чат</button>';
   var fileButton = orderFileButton(order);
   var editButton = order.status === "open" ? '<button class="ghost" data-action="edit-order" data-order="' + h(order.id) + '" type="button">Редактировать</button>' : "";
   var cancelButton = order.status === "open" || order.status === "in_progress" ? '<button class="ghost" data-action="cancel-order" data-order="' + h(order.id) + '" type="button">Отменить</button>' : "";
   var completeButton = order.status === "in_progress" ? '<button class="ghost" data-action="complete-order" data-order="' + h(order.id) + '" type="button">Завершить</button>' : "";
   return '<article class="order-card">' +
     drawingPreview(order) +
-    '<div class="card-head"><div><h3>#' + h(order.id) + ' ' + h(order.title) + '</h3><p>' + h(order.budget || "бюджет не указан") + ' · срок до ' + h(order.deadline || "не указан") + '</p></div><span class="status ' + statusClass(order.status) + '">' + h(statusLabel(order.status)) + '</span></div>' +
+    '<div class="card-head"><div><h3>#' + h(order.id) + ' ' + h(order.title) + '</h3><p><span class="order-accent">' + h(order.budget || "бюджет не указан") + '</span> · срок до <span class="order-accent">' + h(order.deadline || "не указан") + '</span></p></div><span class="status ' + statusClass(order.status) + '">' + h(statusLabel(order.status)) + '</span></div>' +
     '<div class="tags"><span class="tag">' + h(order.material || "Материал не указан") + '</span><span class="tag">' + h(order.quantity || 0) + ' шт.</span><span class="tag">Предложений: ' + h(order.offers_count || 0) + '</span></div>' +
     offersPreview +
     '<div class="card-actions"><button class="primary small" data-action="view-offers" data-order="' + h(order.id) + '" type="button">Смотреть предложения</button>' + fileButton + chatButton + editButton + cancelButton + completeButton + '</div></article>';
@@ -667,7 +649,7 @@ function offerRow(offer) {
     : (offer.status === "declined" ? '<button class="primary small" data-action="open-offer" data-order="' + h(offer.order_id) + '" type="button">Сделать новое предложение</button>' : "");
   return '<article class="order-card">' +
     drawingPreview(order) +
-    '<div class="card-head"><div><h3>#' + h(offer.order_id) + ' ' + h(offer.order_title || "Заказ") + '</h3><p>' + h(offer.city || "") + ' · ' + h(offer.price || "цена не указана") + '</p></div><span class="status ' + statusClass(offer.status) + '">' + h(offerStatus(offer.status)) + '</span></div>' +
+    '<div class="card-head"><div><h3>#' + h(offer.order_id) + ' ' + h(offer.order_title || "Заказ") + '</h3><p>' + h(offer.city || "") + ' · <span class="order-accent">' + h(offer.price || "цена не указана") + '</span></p></div><span class="status ' + statusClass(offer.status) + '">' + h(offerStatus(offer.status)) + '</span></div>' +
     '<p>' + h(offer.comment || "") + '</p><div class="card-actions">' + fileButton + chatButton + '</div></article>';
 }
 
@@ -712,8 +694,8 @@ function renderOpenOrders() {
         ? '<button class="ghost" disabled type="button">Предложение принято</button>'
         : '<button class="primary small" data-action="open-offer" data-order="' + h(order.id) + '" type="button">💰 Сделать предложение</button>');
     return '<article class="entity-card order-search-card">' + drawingPreview(order) +
-      '<div class="card-head"><div><h3>#' + h(order.id) + ' ' + h(order.title) + '</h3><p>' + h(order.customer_name || "Заказчик") + ' · ' + h(order.city || "") + ' · до ' + h(order.deadline || "") + '</p></div><span class="badge neutral">' + h(order.material || "") + '</span></div>' +
-      '<div class="tags"><span class="tag">' + h(order.quantity || 0) + ' шт.</span><span class="tag">срочность: ' + h(order.urgency || "не указана") + '</span><span class="tag">' + h(order.budget || "бюджет не указан") + '</span></div>' +
+      '<div class="card-head"><div><h3>#' + h(order.id) + ' ' + h(order.title) + '</h3><p>' + h(order.customer_name || "Заказчик") + ' · ' + h(order.city || "") + ' · до <span class="order-accent">' + h(order.deadline || "") + '</span></p></div><span class="badge neutral">' + h(order.material || "") + '</span></div>' +
+      '<div class="tags"><span class="tag">' + h(order.quantity || 0) + ' шт.</span><span class="tag">срочность: ' + h(order.urgency || "не указана") + '</span><span class="tag order-accent">' + h(order.budget || "бюджет не указан") + '</span></div>' +
       '<div class="card-actions">' + orderFileButton(order) + offerButton + '</div></article>';
   }).join("") || emptyPanel("Открытых заказов нет", "Подходящих заказов по фильтрам не найдено.");
   if (state.pagination.openOrders.hasMore) {
@@ -775,7 +757,7 @@ function renderOffers() {
     var actions = offer.status === "pending"
       ? '<button class="primary small" data-action="accept-offer" data-offer="' + h(offer.id) + '" type="button">✅ Принять</button><button class="ghost" data-action="decline-offer" data-offer="' + h(offer.id) + '" type="button">❌ Отклонить</button>'
       : (offer.status === "accepted" ? '<button class="ghost" data-action="select-chat" data-order="' + h(offer.order_id) + '" type="button">💬 Чат</button>' : "");
-    return '<article class="order-card"><div class="card-head"><div><h3>Заказ #' + h(offer.order_id) + ' ' + h(offer.order_title || "") + '</h3><p>' + h(offer.executor_company || "Исполнитель") + ' · ' + h(offer.deadline || "срок не указан") + '</p></div><strong>' + h(offer.price || "") + '</strong></div><div class="tags"><span class="status ' + statusClass(offer.status) + '">' + h(offerStatus(offer.status)) + '</span></div><p>' + h(offer.comment || "") + '</p><div class="card-actions">' + actions + '</div></article>';
+    return '<article class="order-card"><div class="card-head"><div><h3>Заказ #' + h(offer.order_id) + ' ' + h(offer.order_title || "") + '</h3><p>' + h(offer.executor_company || "Исполнитель") + ' · срок <span class="order-accent">' + h(offer.deadline || "не указан") + '</span></p></div><strong class="order-accent">' + h(offer.price || "") + '</strong></div><div class="tags"><span class="status ' + statusClass(offer.status) + '">' + h(offerStatus(offer.status)) + '</span></div><p>' + h(offer.comment || "") + '</p><div class="card-actions">' + actions + '</div></article>';
   }).join("") || emptyPanel("Предложений пока нет", "Когда исполнители откликнутся, они появятся здесь.");
 }
 
@@ -999,6 +981,9 @@ function initEvents() {
   $("#chatOrderSelect").addEventListener("change", selectChatOrder);
   $("#publishOrderBtn").addEventListener("click", publishOrder);
   $("#clearOrderBtn").addEventListener("click", clearOrderForm);
+  if ($("#menuToggle")) $("#menuToggle").addEventListener("click", openMenu);
+  if ($("#menuClose")) $("#menuClose").addEventListener("click", closeMenu);
+  if ($("#menuBackdrop")) $("#menuBackdrop").addEventListener("click", closeMenu);
   $("#cityFilter").addEventListener("change", renderMarket);
   $("#workFilter").addEventListener("change", renderMarket);
   $("#offerForm").addEventListener("submit", submitOffer);
@@ -1026,6 +1011,9 @@ function initEvents() {
     if (event.target && event.target.matches("[data-setting]")) saveSetting(event.target);
   });
   document.addEventListener("click", handleActionClick);
+  document.addEventListener("keydown", function (event) {
+    if (event.key === "Escape") closeMenu();
+  });
   updateApiTools();
   startPolling();
 }
@@ -1749,7 +1737,7 @@ function offerStatus(status) {
 
 function statusClass(status) {
   if (status === "completed") return "done";
-  if (status === "in_progress" || status === "pending" || status === "accepted") return "warn";
+  if (status === "in_progress" || status === "accepted") return "warn";
   if (status === "declined") return "bad";
   if (status === "cancelled") return "muted";
   return "";
@@ -1761,11 +1749,11 @@ function dayLabel(status) {
 }
 
 function emptyPanel(title, text) {
-  return '<article class="panel empty"><h2>' + h(title) + '</h2><p>' + h(text) + '</p></article>';
+  return '<article class="panel empty"><span class="empty-icon">⌁</span><h2>' + h(title) + '</h2><p>' + h(text) + '</p></article>';
 }
 
 function emptyInline(text) {
-  return '<div class="empty-inline">' + h(text) + '</div>';
+  return '<div class="empty-inline"><span class="empty-icon">⌁</span><p>' + h(text) + '</p></div>';
 }
 
 function number(value) {
